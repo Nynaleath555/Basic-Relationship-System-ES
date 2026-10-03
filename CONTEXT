@@ -1,0 +1,167 @@
+/* =========================================================
+   BASIC REL ES v1 — CONTEXT HOOK
+   VERSION: 1.0
+   HOOK: CONTEXT
+   ========================================================= */
+
+const modifier = (text) => {
+
+  if (
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.ensureConfigCard();
+  }
+
+  if (
+    typeof REL === "undefined"
+  ) {
+    return {
+      text
+    };
+  }
+
+  const relationships = REL.init();
+
+  const relationshipNPCs =
+    REL.syncCharacters(
+      storyCards
+    );
+
+  const manualEdit =
+    REL.applyManualEdit();
+
+  if (
+    manualEdit.applied &&
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.update(
+      manualEdit.name
+    );
+  }
+
+  const detectedGender =
+    REL.parsePlayerGender(text);
+
+  if (
+    detectedGender !== "unknown"
+  ) {
+    relationships.playerGender =
+      detectedGender;
+  }
+
+  const scene =
+    REL.updateSceneTracker(
+      relationships.lastInput || "",
+      relationshipNPCs
+    );
+
+  const currentInput =
+    relationships.lastInput || "";
+
+  const relationshipTargets =
+    REL.getRelationshipTargets(
+      scene,
+      currentInput,
+      relationshipNPCs
+    );
+
+  const romanticAdvance =
+    /\b(flirt|flirting|flirted|hit on|make a pass|romantic|romantically|ask(?:s|ed)? (?:him|her|them) out|date|dating|kiss|kisses|kissed|love|fall in love|attracted|attraction|seduce|seduces|seduced)\b/i
+      .test(
+        currentInput
+      );
+
+  const physicalAdvance =
+    /\b(kiss|kisses|kissed|hug|hugs|hugged|embrace|embraces|embraced|touch|touches|touched|caress|caresses|caressed|cuddle|cuddles|cuddled|hold hands|holds hands|held hands|gets closer|move closer|moves closer|leans closer|lean closer|pull closer|pulls closer|grab|grabs|grabbed)\b/i
+      .test(
+        currentInput
+      );
+
+  for (
+    const npcName
+    of relationshipTargets
+  ) {
+
+    const npc =
+      relationshipNPCs.find(
+        x => x.name === npcName
+      );
+
+    if (!npc) {
+      continue;
+    }
+
+    const compatible =
+      REL.compatible(
+        relationships.playerGender,
+        npc.gender,
+        npc.orientation
+      );
+
+    if (
+      !compatible &&
+      (
+        romanticAdvance ||
+        physicalAdvance
+      )
+    ) {
+
+      text +=
+        "\n\n" +
+        "[ROMANTIC COMPATIBILITY ENFORCEMENT — ABSOLUTE RULE]\n" +
+        "The player is making a romantic, flirtatious, or physical advance toward " +
+        npc.name +
+        ".\n" +
+        npc.name +
+        " is romantically incompatible with the player.\n\n" +
+        "This incompatibility is absolute and cannot change.\n" +
+        npc.name +
+        " MUST NOT reciprocate romantic or sexual attraction toward the player.\n" +
+        npc.name +
+        " MUST NOT develop a crush, romantic interest, sexual attraction, or love for the player.\n" +
+        npc.name +
+        " MUST reject or deflect romantic and sexual advances from the player.\n\n" +
+        "If the player attempts flirting, " +
+        npc.name +
+        " should respond with a clear lack of romantic reciprocity. " +
+        "The response may be polite, awkward, embarrassed, amused, uncomfortable, " +
+        "confused, irritated, or firmly rejecting depending on the character's personality, " +
+        "but it must NOT be portrayed as reciprocal romantic attraction.\n\n" +
+        "If the player attempts unwanted romantic physical contact, " +
+        npc.name +
+        " must not willingly reciprocate it. " +
+        "The character should instead pull away, refuse, stop the advance, " +
+        "or otherwise establish a clear boundary appropriate to the situation.\n\n" +
+        "IMPORTANT: Blushing, nervousness, embarrassment, surprise, or emotional intensity " +
+        "does NOT mean romantic attraction. Do not reinterpret these reactions as attraction.\n\n" +
+        "Friendship remains independent from romance. " +
+        npc.name +
+        " may still like, trust, respect, care about, or be friends with the player " +
+        "without romantic or sexual attraction.\n\n" +
+        "Do not change the character's sexual orientation to create romance.\n" +
+        "Do not create an exception, sudden realization, hidden attraction, or 'despite their orientation' romance.\n" +
+        "[END ROMANTIC COMPATIBILITY ENFORCEMENT]";
+    }
+  }
+
+  const relationshipContext =
+    REL.buildContext(
+      relationshipNPCs,
+      scene,
+      currentInput
+    );
+
+  if (
+    relationshipContext
+  ) {
+    text +=
+      "\n\n" +
+      relationshipContext;
+  }
+
+  return {
+    text: text
+  };
+};
+
+modifier(text);
