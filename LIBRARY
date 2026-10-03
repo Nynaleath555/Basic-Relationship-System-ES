@@ -8,14 +8,48 @@ const REL = {
   VERSION: "1.0",
 
   genders: {
-    man: ["man", "male", "boy"],
-    woman: ["woman", "female", "girl"],
+    man: [
+      "man",
+      "male",
+      "boy",
+      "hombre",
+      "masculino",
+      "varón",
+      "varon",
+      "chico",
+      "hombre trans",
+      "trans hombre",
+      "trans man"
+    ],
+
+    woman: [
+      "woman",
+      "female",
+      "girl",
+      "mujer",
+      "femenino",
+      "chica",
+      "mujer trans",
+      "trans mujer",
+      "trans woman"
+    ],
+
     "non-binary": [
       "non-binary",
       "nonbinary",
       "non binary",
       "enby",
-      "nb"
+      "nb",
+      "no binario",
+      "no-binario",
+      "no binaria",
+      "no-binaria",
+      "no binarie",
+      "no-binarie",
+      "persona no binaria",
+      "persona no-binaria",
+      "persona no binarie",
+      "persona no-binarie"
     ]
   },
 
@@ -210,6 +244,24 @@ const REL = {
 
     match =
       essentials.match(
+        /\bGénero:\s*([^\n\r]+)/i
+      );
+
+    if (match) {
+      const gender =
+        this.normalizeGender(
+          match[1]
+        );
+
+      if (
+        gender !== "unknown"
+      ) {
+        return gender;
+      }
+    }
+
+    match =
+      essentials.match(
         /\bPronouns:\s*([^\n\r]+)/i
       );
 
@@ -238,6 +290,39 @@ const REL = {
         /\bthey\s*\/\s*them\b/.test(
           pronouns
         )
+      ) {
+        return "non-binary";
+      }
+    }
+
+    match =
+      essentials.match(
+        /\bPronombres:\s*([^\n\r]+)/i
+      );
+
+    if (match) {
+      const pronouns =
+        match[1]
+          .toLowerCase()
+          .trim();
+
+      if (
+        /(?:^|[\s,;:/()[\]-])ella(?:$|[\s,;:/()[\]-])/
+          .test(pronouns)
+      ) {
+        return "woman";
+      }
+
+      if (
+        /(?:^|[\s,;:/()[\]-])él(?:$|[\s,;:/()[\]-])/
+          .test(pronouns)
+      ) {
+        return "man";
+      }
+
+      if (
+        /(?:^|[\s,;:/()[\]-])elle(?:$|[\s,;:/()[\]-])/
+          .test(pronouns)
       ) {
         return "non-binary";
       }
@@ -452,7 +537,9 @@ const REL = {
         source,
         [
           /^\s*Gender\s*:\s*([^\n\r]+)/im,
-          /^\s*Sex\s*:\s*([^\n\r]+)/im
+          /^\s*Género\s*:\s*([^\n\r]+)/im,
+          /^\s*Sex\s*:\s*([^\n\r]+)/im,
+          /^\s*Sexo\s*:\s*([^\n\r]+)/im
         ]
       );
 
@@ -477,6 +564,12 @@ const REL = {
         ) ||
         /\benby\b/.test(
           lowered
+        ) ||
+        /\bno[- ]?binari[oa]\b/.test(
+          lowered
+        ) ||
+        /\bno[- ]?binarie\b/.test(
+          lowered
         )
       ) {
         return "non-binary";
@@ -484,6 +577,15 @@ const REL = {
 
       if (
         /\bmale\b|\bman\b|\bboy\b/.test(
+          lowered
+        ) ||
+        /\bmasculino\b|\bhombre\b|\bvar[oó]n\b|\bchico\b/.test(
+          lowered
+        ) ||
+        /\btrans\s+man\b/.test(
+          lowered
+        ) ||
+        /\bhombre\s+trans\b/.test(
           lowered
         )
       ) {
@@ -493,6 +595,15 @@ const REL = {
       if (
         /\bfemale\b|\bwoman\b|\bgirl\b/.test(
           lowered
+        ) ||
+        /\bfemenino\b|\bmujer\b|\bchica\b/.test(
+          lowered
+        ) ||
+        /\btrans\s+woman\b/.test(
+          lowered
+        ) ||
+        /\bmujer\s+trans\b/.test(
+          lowered
         )
       ) {
         return "woman";
@@ -501,6 +612,8 @@ const REL = {
 
     if (
       /\bpronouns?\s*:\s*[^\n\r]*\bshe\s*\/\s*her\b/i
+        .test(source) ||
+      /\bpronombres?\s*:\s*[^\n\r]*ella\b/i
         .test(source)
     ) {
       return "woman";
@@ -508,6 +621,8 @@ const REL = {
 
     if (
       /\bpronouns?\s*:\s*[^\n\r]*\bhe\s*\/\s*him\b/i
+        .test(source) ||
+      /\bpronombres?\s*:\s*[^\n\r]*él\b/i
         .test(source)
     ) {
       return "man";
@@ -515,6 +630,8 @@ const REL = {
 
     if (
       /\bpronouns?\s*:\s*[^\n\r]*\bthey\s*\/\s*them\b/i
+        .test(source) ||
+      /\bpronombres?\s*:\s*[^\n\r]*elle\b/i
         .test(source)
     ) {
       return "non-binary";
@@ -542,7 +659,69 @@ const REL = {
     }
 
     if (
+      /\b(?:es|es un|es una|se identifica como|se identifica con)\s+(?:un\s+)?(?:hombre|masculino|var[oó]n|chico)\b/i
+        .test(source)
+    ) {
+      return "man";
+    }
+
+    if (
+      /\b(?:es|es un|es una|se identifica como|se identifica con)\s+(?:una\s+)?(?:mujer|femenino|chica)\b/i
+        .test(source)
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\b(?:es|se identifica como|se identifica con)\s+(?:no[- ]?binari[oa]|no[- ]?binarie)\b/i
+        .test(source)
+    ) {
+      return "non-binary";
+    }
+
+    if (
+      /\b(?:es|se identifica como|se identifica con)\s+(?:un\s+)?(?:hombre\s+trans|trans\s+hombre|trans\s+man)\b/i
+        .test(source)
+    ) {
+      return "man";
+    }
+
+    if (
+      /\b(?:es|se identifica como|se identifica con)\s+(?:una\s+)?(?:mujer\s+trans|trans\s+mujer|trans\s+woman)\b/i
+        .test(source)
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\b(?:de\s+)?género\s+(?:masculino|hombre)\b/i
+        .test(source)
+    ) {
+      return "man";
+    }
+
+    if (
+      /\b(?:de\s+)?género\s+(?:femenino|mujer)\b/i
+        .test(source)
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\b(?:de\s+)?género\s+(?:no[- ]?binari[oa]|no[- ]?binarie)\b/i
+        .test(source)
+    ) {
+      return "non-binary";
+    }
+
+    if (
       /\bnon[- ]?binary\b/i.test(
+        source
+      ) ||
+      /\bno[- ]?binari[oa]\b/i.test(
+        source
+      ) ||
+      /\bno[- ]?binarie\b/i.test(
         source
       )
     ) {
@@ -552,6 +731,15 @@ const REL = {
     if (
       /\bfemale\b/i.test(
         source
+      ) ||
+      /\bfemenino\b/i.test(
+        source
+      ) ||
+      /\bmujer\b/i.test(
+        source
+      ) ||
+      /\bchica\b/i.test(
+        source
       )
     ) {
       return "woman";
@@ -559,6 +747,18 @@ const REL = {
 
     if (
       /\bmale\b/i.test(
+        source
+      ) ||
+      /\bmasculino\b/i.test(
+        source
+      ) ||
+      /\bhombre\b/i.test(
+        source
+      ) ||
+      /\bvar[oó]n\b/i.test(
+        source
+      ) ||
+      /\bchico\b/i.test(
         source
       )
     ) {
