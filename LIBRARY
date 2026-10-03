@@ -1,0 +1,4781 @@
+/* ============================================================
+   BASIC REL v3
+   VERSION: 3.0
+   ============================================================ */
+
+const REL = {
+
+  VERSION: "3.0",
+
+  genders: {
+    man: ["man", "male", "boy"],
+    woman: ["woman", "female", "girl"],
+    "non-binary": [
+      "non-binary",
+      "nonbinary",
+      "non binary",
+      "enby",
+      "nb"
+    ]
+  },
+
+  orientations: [
+    "heterosexual",
+    "bisexual",
+    "pansexual",
+    "homosexual",
+    "queer"
+  ],
+
+  tracker: {
+    MAX_HISTORY_ACTIONS: 5,
+    ACTIVE_PERSIST_TURNS: 3,
+    MIN_NAME_LENGTH: 3
+  },
+
+  preferences: {
+    LIKE_BONUS: 0.35,
+    STRONG_LIKE_BONUS: 0.50,
+
+    DISLIKE_CONFLICT: -0.50,
+    DISLIKE_INSISTENCE: -0.75,
+    DISLIKE_REPEATED: -1.00
+  },
+
+  init: function () {
+    if (!state.relationships) {
+      state.relationships = {
+        playerGender: "unknown",
+        characters: {},
+        lastInput: "",
+        manualEditLastToken: "",
+        sceneTracker: {
+          activeNames: [],
+          lastDetectedNames: [],
+          lastTargetName: "",
+          turnsSinceDetection: 999
+        }
+      };
+    }
+
+    if (!state.relationships.characters) {
+      state.relationships.characters = {};
+    }
+
+    if (!state.relationships.playerGender) {
+      state.relationships.playerGender = "unknown";
+    }
+
+    if (!state.relationships.lastInput) {
+      state.relationships.lastInput = "";
+    }
+
+    if (
+      typeof state.relationships.manualEditLastToken !==
+      "string"
+    ) {
+      state.relationships.manualEditLastToken = "";
+    }
+
+    if (!state.relationships.sceneTracker) {
+      state.relationships.sceneTracker = {
+        activeNames: [],
+        lastDetectedNames: [],
+        lastTargetName: "",
+        turnsSinceDetection: 999
+      };
+    }
+
+    if (
+      !Array.isArray(
+        state.relationships.sceneTracker.activeNames
+      )
+    ) {
+      state.relationships.sceneTracker.activeNames = [];
+    }
+
+    if (
+      !Array.isArray(
+        state.relationships.sceneTracker.lastDetectedNames
+      )
+    ) {
+      state.relationships.sceneTracker.lastDetectedNames = [];
+    }
+
+    if (
+      !Number.isFinite(
+        state.relationships.sceneTracker.turnsSinceDetection
+      )
+    ) {
+      state.relationships.sceneTracker.turnsSinceDetection = 999;
+    }
+
+    if (
+      typeof state.relationships.sceneTracker.lastTargetName !==
+      "string"
+    ) {
+      state.relationships.sceneTracker.lastTargetName = "";
+    }
+
+    return state.relationships;
+  },
+
+  normalizeGender: function (value) {
+    const v =
+      String(value || "")
+        .toLowerCase()
+        .trim();
+
+    for (const gender in this.genders) {
+      if (this.genders[gender].includes(v)) {
+        return gender;
+      }
+    }
+
+    return "unknown";
+  },
+
+  normalizeOrientation: function (value) {
+    const v =
+      String(value || "")
+        .toLowerCase()
+        .trim();
+
+    if (this.orientations.includes(v)) {
+      return v;
+    }
+
+    if (
+      v === "straight" ||
+      v === "hetero"
+    ) {
+      return "heterosexual";
+    }
+
+    if (
+      v === "gay" ||
+      v === "lesbian"
+    ) {
+      return "homosexual";
+    }
+
+    return "unknown";
+  },
+
+  parsePlayerGender: function (contextText) {
+    const text =
+      String(contextText || "");
+
+    let essentials =
+      text;
+
+    const cutPoints = [
+      text.search(/World Lore:/i),
+      text.search(/Story Summary:/i),
+      text.search(/Memories:/i)
+    ].filter(
+      n => n >= 0
+    );
+
+    if (
+      cutPoints.length > 0
+    ) {
+      essentials =
+        text.slice(
+          0,
+          Math.min.apply(
+            null,
+            cutPoints
+          )
+        );
+    }
+
+    let match =
+      essentials.match(
+        /\bGender:\s*([^\n\r]+)/i
+      );
+
+    if (match) {
+      const gender =
+        this.normalizeGender(
+          match[1]
+        );
+
+      if (
+        gender !== "unknown"
+      ) {
+        return gender;
+      }
+    }
+
+    match =
+      essentials.match(
+        /\bPronouns:\s*([^\n\r]+)/i
+      );
+
+    if (match) {
+      const pronouns =
+        match[1]
+          .toLowerCase();
+
+      if (
+        /\bshe\s*\/\s*her\b/.test(
+          pronouns
+        )
+      ) {
+        return "woman";
+      }
+
+      if (
+        /\bhe\s*\/\s*him\b/.test(
+          pronouns
+        )
+      ) {
+        return "man";
+      }
+
+      if (
+        /\bthey\s*\/\s*them\b/.test(
+          pronouns
+        )
+      ) {
+        return "non-binary";
+      }
+    }
+
+    return "unknown";
+  },
+
+  parsePreferenceList: function (
+    entry,
+    label
+  ) {
+    const source =
+      String(entry || "");
+
+    const escapedLabel =
+      String(label || "")
+        .replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
+
+    const match =
+      source.match(
+        new RegExp(
+          "^\\s*" +
+          escapedLabel +
+          "\\s*:\\s*([^\\n\\r]+)",
+          "im"
+        )
+      );
+
+    if (!match) {
+      return [];
+    }
+
+    return match[1]
+      .split(",")
+      .map(
+        item =>
+          String(item || "")
+            .trim()
+            .replace(
+              /^[-•*]\s*/,
+              ""
+            )
+            .trim()
+      )
+      .filter(Boolean);
+  },
+
+  extractFlexibleField: function (
+    text,
+    patterns
+  ) {
+    const source =
+      String(text || "");
+
+    for (
+      const pattern
+      of patterns || []
+    ) {
+      const match =
+        source.match(pattern);
+
+      if (
+        match &&
+        match[1] &&
+        String(match[1]).trim()
+      ) {
+        return String(
+          match[1]
+        ).trim();
+      }
+    }
+
+    return "";
+  },
+
+  extractFlexibleList: function (
+    text,
+    patterns
+  ) {
+    const value =
+      this.extractFlexibleField(
+        text,
+        patterns
+      );
+
+    if (!value) {
+      return [];
+    }
+
+    return value
+      .split(
+        /,(?![^(]*\))|\s+\band\b\s+|\s*;\s*/
+      )
+      .map(
+        item =>
+          String(item || "")
+            .trim()
+            .replace(
+              /^[-•*]\s*/,
+              ""
+            )
+            .trim()
+      )
+      .filter(Boolean);
+  },
+
+  parseFlexibleName: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    const value =
+      this.extractFlexibleField(
+        source,
+        [
+          /^\s*(?:Complete\s+Name|Full\s+Name|Character\s+Name|NPC\s+Name)\s*:\s*([^\n\r]+)/im,
+          /^\s*(?:Complete\s+Name|Full\s+Name|Character\s+Name|NPC\s+Name)\s*=\s*([^\n\r]+)/im,
+          /^\s*Name\s*:\s*([^\n\r]+)/im,
+          /^\s*Name\s*=\s*([^\n\r]+)/im,
+          /\b(?:character_name|character-name|full_name)\s*[:=]\s*["']?([^"'\n\r]+)["']?/i
+        ]
+      );
+
+    return String(
+      value || ""
+    )
+      .trim()
+      .replace(
+        /^[-•*]\s*/,
+        ""
+      )
+      .trim();
+  },
+
+  parseFlexibleAge: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    let match =
+      source.match(
+        /\b(?:Age|Years?\s*Old)\s*:\s*(\d{1,3})\b/i
+      );
+
+    if (match) {
+      return Number(
+        match[1]
+      );
+    }
+
+    match =
+      source.match(
+        /\baged\s+(\d{1,3})\b/i
+      );
+
+    if (match) {
+      return Number(
+        match[1]
+      );
+    }
+
+    match =
+      source.match(
+        /\b(\d{1,3})\s*[- ]year[- ]old\b/i
+      );
+
+    if (match) {
+      return Number(
+        match[1]
+      );
+    }
+
+    match =
+      source.match(
+        /\b(\d{1,3})\s+years?\s+old\b/i
+      );
+
+    if (match) {
+      return Number(
+        match[1]
+      );
+    }
+
+    match =
+      source.match(
+        /\b(\d{1,3})\s+years?\b/i
+      );
+
+    if (match) {
+      return Number(
+        match[1]
+      );
+    }
+
+    return null;
+  },
+
+  parseFlexibleGender: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    let value =
+      this.extractFlexibleField(
+        source,
+        [
+          /^\s*Gender\s*:\s*([^\n\r]+)/im,
+          /^\s*Sex\s*:\s*([^\n\r]+)/im
+        ]
+      );
+
+    if (value) {
+      const direct =
+        this.normalizeGender(
+          value
+        );
+
+      if (
+        direct !== "unknown"
+      ) {
+        return direct;
+      }
+
+      const lowered =
+        value.toLowerCase();
+
+      if (
+        /\bnon[- ]?binary\b/.test(
+          lowered
+        ) ||
+        /\benby\b/.test(
+          lowered
+        )
+      ) {
+        return "non-binary";
+      }
+
+      if (
+        /\bmale\b|\bman\b|\bboy\b/.test(
+          lowered
+        )
+      ) {
+        return "man";
+      }
+
+      if (
+        /\bfemale\b|\bwoman\b|\bgirl\b/.test(
+          lowered
+        )
+      ) {
+        return "woman";
+      }
+    }
+
+    if (
+      /\bpronouns?\s*:\s*[^\n\r]*\bshe\s*\/\s*her\b/i
+        .test(source)
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\bpronouns?\s*:\s*[^\n\r]*\bhe\s*\/\s*him\b/i
+        .test(source)
+    ) {
+      return "man";
+    }
+
+    if (
+      /\bpronouns?\s*:\s*[^\n\r]*\bthey\s*\/\s*them\b/i
+        .test(source)
+    ) {
+      return "non-binary";
+    }
+
+    if (
+      /\b(?:he|him)\s+(?:is|identifies as)\s+(?:a\s+)?(?:man|male|boy)\b/i
+        .test(source)
+    ) {
+      return "man";
+    }
+
+    if (
+      /\b(?:she|her)\s+(?:is|identifies as)\s+(?:a\s+)?(?:woman|female|girl)\b/i
+        .test(source)
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\b(?:they|them)\s+(?:are|identify as)\s+(?:a\s+)?(?:non[- ]?binary|enby)\b/i
+        .test(source)
+    ) {
+      return "non-binary";
+    }
+
+    if (
+      /\bnon[- ]?binary\b/i.test(
+        source
+      )
+    ) {
+      return "non-binary";
+    }
+
+    if (
+      /\bfemale\b/i.test(
+        source
+      )
+    ) {
+      return "woman";
+    }
+
+    if (
+      /\bmale\b/i.test(
+        source
+      )
+    ) {
+      return "man";
+    }
+
+    return "unknown";
+  },
+
+  parseFlexibleOrientation: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    let value =
+      this.extractFlexibleField(
+        source,
+        [
+          /^\s*Orientation\s*:\s*([^\n\r]+)/im,
+          /^\s*Sexual\s+Orientation\s*:\s*([^\n\r]+)/im
+        ]
+      );
+
+    if (value) {
+      const direct =
+        this.normalizeOrientation(
+          value
+        );
+
+      if (
+        direct !== "unknown"
+      ) {
+        return direct;
+      }
+    }
+
+    const lowered =
+      source.toLowerCase();
+
+    if (
+      /\bpansexual\b/.test(
+        lowered
+      )
+    ) {
+      return "pansexual";
+    }
+
+    if (
+      /\bbisexual\b/.test(
+        lowered
+      )
+    ) {
+      return "bisexual";
+    }
+
+    if (
+      /\bheterosexual\b/.test(
+        lowered
+      ) ||
+      /\bstraight\b/.test(
+        lowered
+      )
+    ) {
+      return "heterosexual";
+    }
+
+    if (
+      /\bhomosexual\b/.test(
+        lowered
+      ) ||
+      /\bgay\b/.test(
+        lowered
+      ) ||
+      /\blesbian\b/.test(
+        lowered
+      )
+    ) {
+      return "homosexual";
+    }
+
+    if (
+      /\bqueer\b/.test(
+        lowered
+      )
+    ) {
+      return "queer";
+    }
+
+    return "unknown";
+  },
+
+  parseFlexibleRelationshipStatus: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    let value =
+      this.extractFlexibleField(
+        source,
+        [
+          /^\s*Relationship\s+Status\s*:\s*([^\n\r]+)/im,
+          /^\s*Romantic\s+Status\s*:\s*([^\n\r]+)/im,
+          /^\s*Status\s*:\s*([^\n\r]+)/im
+        ]
+      );
+
+    if (value) {
+      const lowered =
+        value.toLowerCase();
+
+      if (
+        /\bmarried\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "married",
+          target: ""
+        };
+      }
+
+      if (
+        /\bengaged\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "relationship",
+          target: ""
+        };
+      }
+
+      if (
+        /\bin\s+(?:a\s+)?relationship\b/.test(
+          lowered
+        ) ||
+        /\bdating\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "relationship",
+          target: ""
+        };
+      }
+
+      if (
+        /\bin[- ]love\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "in-love",
+          target: ""
+        };
+      }
+
+      if (
+        /\bcrush\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "crush",
+          target: ""
+        };
+      }
+
+      if (
+        /\bsingle\b/.test(
+          lowered
+        )
+      ) {
+        return {
+          status: "single",
+          target: ""
+        };
+      }
+    }
+
+    let match =
+      source.match(
+        /has\s+a\s+crush\s+on\s+([^.\n]+)/i
+      );
+
+    if (match) {
+      return {
+        status: "crush",
+        target:
+          match[1].trim()
+      };
+    }
+
+    match =
+      source.match(
+        /is\s+in\s+love\s+with\s+([^.\n]+)/i
+      );
+
+    if (match) {
+      return {
+        status: "in-love",
+        target:
+          match[1].trim()
+      };
+    }
+
+    match =
+      source.match(
+        /is\s+in\s+a\s+relationship\s+with\s+([^.\n]+)/i
+      );
+
+    if (match) {
+      return {
+        status: "relationship",
+        target:
+          match[1].trim()
+      };
+    }
+
+    match =
+      source.match(
+        /married\s+to\s+([^.\n]+)/i
+      );
+
+    if (match) {
+      return {
+        status: "married",
+        target:
+          match[1].trim()
+      };
+    }
+
+    return {
+      status: "single",
+      target: ""
+    };
+  },
+
+  parseFlexiblePreferenceProfile: function (
+    entry
+  ) {
+    const source =
+      String(entry || "");
+
+    const result = {
+      hobbies: [],
+      likes: [],
+      dislikes: []
+    };
+
+    result.hobbies =
+      this.extractFlexibleList(
+        source,
+        [
+          /^\s*Hobbies?\s*:\s*([^\n\r]+)/im,
+          /^\s*Pastimes?\s*:\s*([^\n\r]+)/im,
+          /^\s*Hobbies?\s*=\s*([^\n\r]+)/im,
+          /\bhobbies?\s+include\s+([^\n\r.]+)/i
+        ]
+      );
+
+    result.likes =
+      this.extractFlexibleList(
+        source,
+        [
+          /^\s*Likes?\s*:\s*([^\n\r]+)/im,
+          /^\s*Favorites?\s*:\s*([^\n\r]+)/im,
+          /^\s*Favourites?\s*:\s*([^\n\r]+)/im,
+          /^\s*Interests?\s*:\s*([^\n\r]+)/im,
+          /^\s*Enjoys?\s*:\s*([^\n\r]+)/im,
+          /^\s*Likes?\s*=\s*([^\n\r]+)/im
+        ]
+      );
+
+    result.dislikes =
+      this.extractFlexibleList(
+        source,
+        [
+          /^\s*Dislikes?\s*:\s*([^\n\r]+)/im,
+          /^\s*Hates?\s*:\s*([^\n\r]+)/im,
+          /^\s*Dislikes?\s*=\s*([^\n\r]+)/im,
+          /\b(?:dislikes|hates|cannot stand|can't stand|does not like|doesn't like)\s+([^\n\r.]+)/i
+        ]
+      );
+
+    if (
+      result.hobbies.length === 0
+    ) {
+      const naturalHobbies =
+        source.match(
+          /\benhoy?s?\s+(?:spending\s+time\s+)?(?:on|with)?\s*([^.\n]+)/i
+        );
+
+      if (
+        naturalHobbies
+      ) {
+        const value =
+          naturalHobbies[1]
+            .trim();
+
+        if (
+          value &&
+          !/\b(company|people|friends|family)\b/i.test(
+            value
+          )
+        ) {
+          result.hobbies =
+            value
+              .split(
+                /,(?![^(]*\))|\s+\band\b\s+/
+              )
+              .map(
+                item =>
+                  item.trim()
+              )
+              .filter(Boolean);
+        }
+      }
+    }
+
+    if (
+      result.likes.length === 0
+    ) {
+      const naturalLike =
+        source.match(
+          /\b(?:likes?|loves?|enjoys?)\s+([^.\n]+)/i
+        );
+
+      if (
+        naturalLike
+      ) {
+        result.likes =
+          naturalLike[1]
+            .split(
+              /,(?![^(]*\))|\s+\band\b\s+/
+            )
+            .map(
+              item =>
+                item.trim()
+            )
+            .filter(Boolean);
+      }
+    }
+
+    return result;
+  },
+
+  getPreferenceProfile: function (
+    entry
+  ) {
+    return {
+      hobbies:
+        this.parsePreferenceList(
+          entry,
+          "Hobbies"
+        ),
+
+      likes:
+        this.parsePreferenceList(
+          entry,
+          "Likes"
+        ),
+
+      dislikes:
+        this.parsePreferenceList(
+          entry,
+          "Dislikes"
+        )
+    };
+  },
+
+  normalizePreferenceTerm: function (
+    term
+  ) {
+    let value =
+      String(term || "")
+        .toLowerCase()
+        .trim();
+
+    value =
+      value.replace(
+        /^[\s"'`]+|[\s"'`]+$/g,
+        ""
+      );
+
+    value =
+      value.replace(
+        /^(?:to|the|a|an)\s+/i,
+        ""
+      );
+
+    value =
+      value.replace(
+        /^playing\s+/i,
+        ""
+      );
+
+    value =
+      value.replace(
+        /^spending\s+time\s+(?:on|with)\s+/i,
+        ""
+      );
+
+    return value.trim();
+  },
+
+  getWordForms: function (
+    word
+  ) {
+    const clean =
+      String(word || "")
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9'-]/g,
+          ""
+        )
+        .trim();
+
+    if (!clean) {
+      return [];
+    }
+
+    const forms = [
+      clean
+    ];
+
+    if (
+      clean.endsWith("ing") &&
+      clean.length > 5
+    ) {
+      const baseWithoutIng =
+        clean.slice(0, -3);
+
+      forms.push(
+        baseWithoutIng
+      );
+
+      if (
+        baseWithoutIng.length >= 3 &&
+        !baseWithoutIng.endsWith("e")
+      ) {
+        forms.push(
+          baseWithoutIng + "e"
+        );
+      }
+    }
+
+    if (
+      clean.endsWith("ed") &&
+      clean.length > 4
+    ) {
+      forms.push(
+        clean.slice(0, -2)
+      );
+    }
+
+    if (
+      clean.endsWith("s") &&
+      clean.length > 3
+    ) {
+      forms.push(
+        clean.slice(0, -1)
+      );
+    }
+
+    return forms.filter(
+      (value, index, array) =>
+        array.indexOf(value) ===
+        index
+    );
+  },
+
+  tokenisePreferenceTerm: function (
+    term
+  ) {
+    const normalized =
+      this.normalizePreferenceTerm(
+        term
+      );
+
+    if (!normalized) {
+      return [];
+    }
+
+    const ignored = [
+      "the",
+      "a",
+      "an",
+      "to",
+      "of",
+      "for",
+      "with",
+      "and",
+      "or",
+      "on",
+      "in",
+      "at",
+      "about",
+      "playing",
+      "play",
+      "plays",
+      "doing",
+      "do",
+      "does"
+    ];
+
+    return normalized
+      .split(/\s+/)
+      .map(
+        token =>
+          token
+            .replace(
+              /^[^a-z0-9]+|[^a-z0-9]+$/gi,
+              ""
+            )
+            .toLowerCase()
+      )
+      .filter(
+        token =>
+          token &&
+          !ignored.includes(
+            token
+          )
+      );
+  },
+
+  wordLike: function (
+    a,
+    b
+  ) {
+    const formsA =
+      this.getWordForms(a);
+
+    const formsB =
+      this.getWordForms(b);
+
+    for (
+      const formA
+      of formsA
+    ) {
+      for (
+        const formB
+        of formsB
+      ) {
+        if (
+          formA === formB
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  },
+
+  preferenceMatchesInput: function (
+    preference,
+    input
+  ) {
+    const source =
+      String(input || "")
+        .toLowerCase();
+
+    const normalized =
+      this.normalizePreferenceTerm(
+        preference
+      );
+
+    if (
+      !normalized ||
+      !source
+    ) {
+      return false;
+    }
+
+    const escaped =
+      normalized.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+    try {
+      if (
+        new RegExp(
+          "\\b" +
+          escaped +
+          "\\b",
+          "i"
+        ).test(source)
+      ) {
+        return true;
+      }
+    } catch (error) {
+      // Continue with token matching.
+    }
+
+    const tokens =
+      this.tokenisePreferenceTerm(
+        preference
+      );
+
+    if (
+      tokens.length === 0
+    ) {
+      return false;
+    }
+
+    const inputTokens =
+      source
+        .split(/\s+/)
+        .map(
+          token =>
+            token.replace(
+              /^[^a-z0-9]+|[^a-z0-9]+$/gi,
+              ""
+            )
+        )
+        .filter(Boolean);
+
+    if (
+      tokens.length === 1
+    ) {
+      return inputTokens.some(
+        inputToken =>
+          this.wordLike(
+            tokens[0],
+            inputToken
+          )
+      );
+    }
+
+    for (
+      const token
+      of tokens
+    ) {
+      const found =
+        inputTokens.some(
+          inputToken =>
+            this.wordLike(
+              token,
+              inputToken
+            )
+        );
+
+      if (!found) {
+        return false;
+      }
+    }
+
+    return true;
+  },
+
+  findPreferenceMatches: function (
+    preferences,
+    input
+  ) {
+    const found = [];
+
+    for (
+      const preference
+      of preferences || []
+    ) {
+      if (
+        this.preferenceMatchesInput(
+          preference,
+          input
+        )
+      ) {
+        found.push(
+          preference
+        );
+      }
+    }
+
+    return found;
+  },
+
+  hasAny: function (
+    text,
+    patterns
+  ) {
+    const t =
+      String(text || "")
+        .toLowerCase();
+
+    for (
+      const pattern
+      of patterns
+    ) {
+      if (
+        pattern.test(t)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  getPlayerPreferenceAttitude: function (
+    input
+  ) {
+    const text =
+      String(input || "")
+        .toLowerCase();
+
+    const stronglyNegative =
+      this.hasAny(
+        text,
+        [
+          /\bi hate\b/,
+          /\bi really hate\b/,
+          /\bi can't stand\b/,
+          /\bi cannot stand\b/,
+          /\bi despise\b/,
+          /\bawful\b/,
+          /\bterrible\b/,
+          /\bhorrible\b/,
+          /\bdisgusting\b/,
+          /\bpathetic\b/,
+          /\bworst\b/,
+          /\bannoying\b/,
+          /\bgarbage\b/,
+          /\btrash\b/
+        ]
+      );
+
+    const negative =
+      this.hasAny(
+        text,
+        [
+          /\bi don't like\b/,
+          /\bi do not like\b/,
+          /\bi dislike\b/,
+          /\bi'm not a fan\b/,
+          /\bi am not a fan\b/,
+          /\bnot very good\b/,
+          /\bnot that good\b/,
+          /\bnot impressive\b/,
+          /\bnot amazing\b/,
+          /\bnot great\b/,
+          /\bbad\b/
+        ]
+      );
+
+    const strongPositive =
+      this.hasAny(
+        text,
+        [
+          /\bis absolutely amazing\b/,
+          /\bis incredible\b/,
+          /\bis fantastic\b/,
+          /\bis wonderful\b/,
+          /\bis awesome\b/,
+          /\bis excellent\b/,
+          /\bis brilliant\b/,
+          /\bis the best\b/,
+          /\bis perfect\b/,
+          /\bi absolutely love\b/,
+          /\bi really love\b/,
+          /\bi love\b/
+        ]
+      );
+
+    const positive =
+      this.hasAny(
+        text,
+        [
+          /\bis great\b/,
+          /\bis amazing\b/,
+          /\bis good\b/,
+          /\bis cool\b/,
+          /\bis awesome\b/,
+          /\bis nice\b/,
+          /\bis wonderful\b/,
+          /\bis impressive\b/,
+          /\bis talented\b/,
+          /\bis beautiful\b/,
+          /\bis interesting\b/,
+          /\bi like\b/,
+          /\bi love\b/,
+          /\bi enjoy\b/,
+          /\bi'm a fan\b/,
+          /\bi am a fan\b/
+        ]
+      );
+
+    const defense =
+      this.hasAny(
+        text,
+        [
+          /\byou're wrong\b/,
+          /\byou are wrong\b/,
+          /\byou only say that\b/,
+          /\byou just say that\b/,
+          /\bthat's only because\b/,
+          /\bthat is only because\b/,
+          /\bdon't judge\b/,
+          /\bdo not judge\b/,
+          /\bgive .* a chance\b/,
+          /\bbut .* is great\b/,
+          /\bbut .* is amazing\b/,
+          /\bbut .* is incredible\b/,
+          /\bbut .* is wonderful\b/,
+          /\bbut .* is awesome\b/,
+          /\bbut .* is talented\b/,
+          /\bbut .* is good\b/
+        ]
+      );
+
+    const attitude =
+      stronglyNegative ||
+      negative
+        ? "negative"
+        : defense ||
+          strongPositive ||
+          positive
+        ? "positive"
+        : "neutral";
+
+    return {
+      attitude,
+      strongPositive:
+        strongPositive,
+      defense:
+        defense,
+      negative:
+        stronglyNegative ||
+        negative
+    };
+  },
+
+  applyManualEdit: function () {
+    const relationships =
+      this.init();
+
+    const result = {
+      applied: false,
+      name: "",
+      reason: ""
+    };
+
+    if (
+      typeof RELStatus === "undefined" ||
+      !Array.isArray(storyCards)
+    ) {
+      return result;
+    }
+
+    const config =
+      RELStatus.getConfigCard(
+        storyCards
+      );
+
+    if (!config) {
+      return result;
+    }
+
+    const entry =
+      String(
+        config.entry || ""
+      );
+
+    const manualMatch =
+      entry.match(
+        /^\s*Manual\s+Stat\s+Edit\s*:\s*([\s\S]*)$/im
+      );
+
+    if (!manualMatch) {
+      return result;
+    }
+
+    const section =
+      String(
+        manualMatch[1] || ""
+      );
+
+    const applyMatch =
+      section.match(
+        /\bApply\s*(?:\:|=)?\s*([^\n\r]+)/i
+      );
+
+    const applyValue =
+      applyMatch
+        ? applyMatch[1]
+            .trim()
+            .toLowerCase()
+        : "";
+
+    if (
+      applyValue !== "yes" &&
+      applyValue !== "true" &&
+      applyValue !== "1"
+    ) {
+      relationships.manualEditLastToken =
+        "";
+
+      return result;
+    }
+
+    const parseValue = (
+      rawValue,
+      min,
+      max
+    ) => {
+
+      const value =
+        String(
+          rawValue || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      if (
+        !value ||
+        value === "unchanged"
+      ) {
+        return {
+          valid: true,
+          changed: false,
+          value: null
+        };
+      }
+
+      const normalized =
+        value.replace(
+          ",",
+          "."
+        );
+
+      if (
+        !/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/
+          .test(normalized)
+      ) {
+        return {
+          valid: false,
+          changed: false,
+          value: null
+        };
+      }
+
+      const number =
+        Number(
+          normalized
+        );
+
+      if (
+        !Number.isFinite(
+          number
+        )
+      ) {
+        return {
+          valid: false,
+          changed: false,
+          value: null
+        };
+      }
+
+      const clamped =
+        Math.max(
+          min,
+          Math.min(
+            max,
+            number
+          )
+        );
+
+      return {
+        valid: true,
+        changed: true,
+        value: clamped
+      };
+    };
+
+    const numberPattern =
+      "[+-]?(?:\\d+(?:[\\.,]\\d+)?|\\.\\d+)";
+
+    let characterTarget =
+      "";
+
+    const characterFieldMatch =
+      section.match(
+        /\b(?:Character|Target|NPC|Name)\s*(?:\:|=)\s*([^\n\r]+)/i
+      );
+
+    if (
+      characterFieldMatch
+    ) {
+      characterTarget =
+        String(
+          characterFieldMatch[1] || ""
+        )
+          .trim()
+          .replace(
+            /\s+/g,
+            " "
+          );
+    }
+
+    let friendshipRaw =
+      null;
+
+    let romanceRaw =
+      null;
+
+    const friendshipLabel =
+      section.match(
+        new RegExp(
+          "\\bFriendship\\s*(?::|=|is|to)?\\s*(" +
+          numberPattern +
+          "|unchanged)\\b",
+          "i"
+        )
+      );
+
+    if (
+      friendshipLabel
+    ) {
+      friendshipRaw =
+        friendshipLabel[1];
+    }
+
+    const romanceLabel =
+      section.match(
+        new RegExp(
+          "\\bRomance\\s*(?::|=|is|to)?\\s*(" +
+          numberPattern +
+          "|unchanged)\\b",
+          "i"
+        )
+      );
+
+    if (
+      romanceLabel
+    ) {
+      romanceRaw =
+        romanceLabel[1];
+    }
+
+    if (
+      !friendshipRaw
+    ) {
+      const naturalFriendship =
+        section.match(
+          new RegExp(
+            "\\bfriendship\\s+(?:to\\s+)?(" +
+            numberPattern +
+            ")\\b",
+            "i"
+          )
+        );
+
+      if (
+        naturalFriendship
+      ) {
+        friendshipRaw =
+          naturalFriendship[1];
+      }
+    }
+
+    if (
+      !romanceRaw
+    ) {
+      const naturalRomance =
+        section.match(
+          new RegExp(
+            "\\bromance\\s+(?:to\\s+)?(" +
+            numberPattern +
+            ")\\b",
+            "i"
+          )
+        );
+
+      if (
+        naturalRomance
+      ) {
+        romanceRaw =
+          naturalRomance[1];
+      }
+    }
+
+    if (
+      !characterTarget
+    ) {
+      const withTarget =
+        section.match(
+          new RegExp(
+            "\\b(?:friendship|romance)\\s+(?:to\\s+)?" +
+            numberPattern +
+            "\\s+(?:with|for)\\s+([^\\n\\r]+)",
+            "i"
+          )
+        );
+
+      if (
+        withTarget
+      ) {
+        characterTarget =
+          withTarget[1]
+            .trim()
+            .replace(
+              /\s+/g,
+              " "
+            );
+      }
+    }
+
+    if (
+      !characterTarget
+    ) {
+      const namedStatEdit =
+        section.match(
+          new RegExp(
+            "\\b(?:set|change|edit|update)?\\s*([^\\n\\r,;:]+?)\\s+(friendship|romance)\\s*(?:to|=|:)?\\s*" +
+            numberPattern,
+            "i"
+          )
+        );
+
+      if (
+        namedStatEdit
+      ) {
+        characterTarget =
+          namedStatEdit[1]
+            .trim()
+            .replace(
+              /^(?:set|change|edit|update)\\s+/i,
+              ""
+            )
+            .replace(
+              /\s+/g,
+              " "
+            );
+      }
+    }
+
+    if (
+      !characterTarget
+    ) {
+      return result;
+    }
+
+    const friendship =
+      parseValue(
+        friendshipRaw || "unchanged",
+        -100,
+        100
+      );
+
+    const romance =
+      parseValue(
+        romanceRaw || "unchanged",
+        0,
+        100
+      );
+
+    if (
+      !friendship.valid ||
+      !romance.valid
+    ) {
+      return result;
+    }
+
+    if (
+      !friendship.changed &&
+      !romance.changed
+    ) {
+      return result;
+    }
+
+    const targetName =
+      characterTarget;
+
+    const token =
+      targetName.toLowerCase() +
+      "|" +
+      String(
+        friendshipRaw || "unchanged"
+      )
+        .trim()
+        .toLowerCase() +
+      "|" +
+      String(
+        romanceRaw || "unchanged"
+      )
+        .trim()
+        .toLowerCase();
+
+    if (
+      relationships.manualEditLastToken ===
+      token
+    ) {
+      return result;
+    }
+
+    let targetKey =
+      Object.keys(
+        relationships.characters
+      ).find(
+        key =>
+          key
+            .trim()
+            .toLowerCase() ===
+          targetName.toLowerCase()
+      );
+
+    if (!targetKey) {
+      const firstMatches =
+        Object.keys(
+          relationships.characters
+        ).filter(
+          key =>
+            key
+              .split(/\s+/)[0]
+              .trim()
+              .toLowerCase() ===
+            targetName.toLowerCase()
+        );
+
+      if (
+        firstMatches.length ===
+        1
+      ) {
+        targetKey =
+          firstMatches[0];
+      }
+    }
+
+    if (!targetKey) {
+      return result;
+    }
+
+    const character =
+      relationships.characters[
+        targetKey
+      ];
+
+    if (
+      friendship.changed
+    ) {
+      character.friendship =
+        friendship.value;
+    }
+
+    if (
+      romance.changed
+    ) {
+      character.romance =
+        romance.value;
+    }
+
+    relationships.manualEditLastToken =
+      token;
+
+    let updatedEntry =
+      entry;
+
+    updatedEntry =
+      updatedEntry.replace(
+        /^(\s*Apply\s*(?:\:|=)?\s*)[^\r\n]*/im,
+        "$1no"
+      );
+
+    updatedEntry =
+      updatedEntry.replace(
+        /^(\s*(?:Character|Target)\s*(?:\:|=)\s*)[^\r\n]*/im,
+        "$1"
+      );
+
+    updatedEntry =
+      updatedEntry.replace(
+        /^(\s*Friendship\s*(?:\:|=)\s*)[^\r\n]*/im,
+        "$1unchanged"
+      );
+
+    updatedEntry =
+      updatedEntry.replace(
+        /^(\s*Romance\s*(?:\:|=)\s*)[^\r\n]*/im,
+        "$1unchanged"
+      );
+
+    const configIndex =
+      storyCards.indexOf(
+        config
+      );
+
+    if (
+      configIndex >= 0
+    ) {
+      const keys =
+        String(
+          config.keys ||
+          RELStatus.CONFIG_KEY
+        );
+
+      const type =
+        String(
+          config.type ||
+          RELStatus.CONFIG_TYPE
+        );
+
+      updateStoryCard(
+        configIndex,
+        keys,
+        updatedEntry,
+        type
+      );
+
+      config.entry =
+        updatedEntry;
+    }
+
+    return {
+      applied: true,
+      name: targetKey,
+      reason: "manual-edit"
+    };
+  },
+
+  parseCards: function (
+    cards
+  ) {
+    const result = [];
+
+    for (
+      const card
+      of cards || []
+    ) {
+
+      const cardType =
+        String(
+          card.type || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      if (
+        cardType !==
+        "character"
+      ) {
+        continue;
+      }
+
+      const entry =
+        String(
+          card.entry || ""
+        );
+
+      if (
+        !entry.trim()
+      ) {
+        continue;
+      }
+
+      const nameMatch =
+        entry.match(
+          /Complete name:\s*([^\n\r]+)/i
+        );
+
+      let name =
+        nameMatch
+          ? nameMatch[1].trim()
+          : "";
+
+      if (!name) {
+        name =
+          this.parseFlexibleName(
+            entry
+          );
+      }
+
+      if (!name) {
+        continue;
+      }
+
+      const demoMatch =
+        entry.match(
+          /^\s*(\d+)\s+years?,\s*([^,\n]+),\s*([^,\n]+),\s*([^\n\r]+)$/im
+        );
+
+      let age =
+        demoMatch
+          ? Number(
+              demoMatch[1]
+            )
+          : null;
+
+      let gender =
+        demoMatch
+          ? this.normalizeGender(
+              demoMatch[2]
+            )
+          : "unknown";
+
+      let orientation =
+        demoMatch
+          ? this.normalizeOrientation(
+              demoMatch[3]
+            )
+          : "unknown";
+
+      if (
+        age === null ||
+        !Number.isFinite(age)
+      ) {
+        age =
+          this.parseFlexibleAge(
+            entry
+          );
+      }
+
+      if (
+        gender === "unknown"
+      ) {
+        gender =
+          this.parseFlexibleGender(
+            entry
+          );
+      }
+
+      if (
+        orientation === "unknown"
+      ) {
+        orientation =
+          this.parseFlexibleOrientation(
+            entry
+          );
+      }
+
+      let romanticStatus =
+        "single";
+
+      let romanticTarget =
+        "";
+
+      let statusFound =
+        false;
+
+      let match =
+        entry.match(
+          /has a crush on\s+([^.\n]+)/i
+        );
+
+      if (match) {
+        romanticStatus =
+          "crush";
+
+        romanticTarget =
+          match[1].trim();
+
+        statusFound =
+          true;
+      }
+
+      match =
+        entry.match(
+          /is in love with\s+([^.\n]+)/i
+        );
+
+      if (match) {
+        romanticStatus =
+          "in-love";
+
+        romanticTarget =
+          match[1].trim();
+
+        statusFound =
+          true;
+      }
+
+      match =
+        entry.match(
+          /is in a relationship with\s+([^.\n]+)/i
+        );
+
+      if (match) {
+        romanticStatus =
+          "relationship";
+
+        romanticTarget =
+          match[1].trim();
+
+        statusFound =
+          true;
+      }
+
+      match =
+        entry.match(
+          /married to\s+([^.\n]+)/i
+        );
+
+      if (match) {
+        romanticStatus =
+          "married";
+
+        romanticTarget =
+          match[1].trim();
+
+        statusFound =
+          true;
+      }
+
+      if (
+        demoMatch
+      ) {
+        const statusText =
+          demoMatch[4]
+            .trim()
+            .toLowerCase();
+
+        if (
+          !statusFound
+        ) {
+          if (
+            /\bmarried\b/.test(
+              statusText
+            )
+          ) {
+            romanticStatus =
+              "married";
+
+            statusFound =
+              true;
+          } else if (
+            /\bcrush\b/.test(
+              statusText
+            )
+          ) {
+            romanticStatus =
+              "crush";
+
+            statusFound =
+              true;
+          } else if (
+            /\bin[- ]love\b/.test(
+              statusText
+            )
+          ) {
+            romanticStatus =
+              "in-love";
+
+            statusFound =
+              true;
+          } else if (
+            /\b(?:relationship|dating|engaged)\b/.test(
+              statusText
+            )
+          ) {
+            romanticStatus =
+              "relationship";
+
+            statusFound =
+              true;
+          } else if (
+            /\bsingle\b/.test(
+              statusText
+            )
+          ) {
+            romanticStatus =
+              "single";
+
+            statusFound =
+              true;
+          }
+        }
+      }
+
+      if (
+        !statusFound
+      ) {
+        const flexibleStatus =
+          this.parseFlexibleRelationshipStatus(
+            entry
+          );
+
+        romanticStatus =
+          flexibleStatus.status;
+
+        romanticTarget =
+          flexibleStatus.target;
+      }
+
+      const strictPreferences =
+        this.getPreferenceProfile(
+          entry
+        );
+
+      const flexiblePreferences =
+        this.parseFlexiblePreferenceProfile(
+          entry
+        );
+
+      const hobbies =
+        strictPreferences.hobbies.length >
+        0
+          ? strictPreferences.hobbies
+          : flexiblePreferences.hobbies;
+
+      const likes =
+        strictPreferences.likes.length >
+        0
+          ? strictPreferences.likes
+          : flexiblePreferences.likes;
+
+      const dislikes =
+        strictPreferences.dislikes.length >
+        0
+          ? strictPreferences.dislikes
+          : flexiblePreferences.dislikes;
+
+      result.push({
+        id:
+          card.id,
+
+        name:
+          name,
+
+        lowerName:
+          name.toLowerCase(),
+
+        age:
+          age,
+
+        gender:
+          gender,
+
+        orientation:
+          orientation,
+
+        romanticStatus:
+          romanticStatus,
+
+        romanticTarget:
+          romanticTarget,
+
+        cardEntry:
+          entry,
+
+        hobbies:
+          hobbies,
+
+        likes:
+          likes,
+
+        dislikes:
+          dislikes
+      });
+    }
+
+    return result;
+  },
+
+  syncCharacters: function (
+    cards
+  ) {
+    const relationships =
+      this.init();
+
+    const npcs =
+      this.parseCards(
+        cards
+      );
+
+    for (
+      const npc
+      of npcs
+    ) {
+
+      if (
+        !relationships.characters[
+          npc.name
+        ]
+      ) {
+        relationships.characters[
+          npc.name
+        ] = {
+          friendship: 0,
+          romance: 0
+        };
+      }
+
+      relationships.characters[
+        npc.name
+      ].age =
+        npc.age;
+
+      relationships.characters[
+        npc.name
+      ].gender =
+        npc.gender;
+
+      relationships.characters[
+        npc.name
+      ].orientation =
+        npc.orientation;
+
+      relationships.characters[
+        npc.name
+      ].romanticStatus =
+        npc.romanticStatus;
+
+      relationships.characters[
+        npc.name
+      ].romanticTarget =
+        npc.romanticTarget;
+
+      relationships.characters[
+        npc.name
+      ].hobbies =
+        npc.hobbies;
+
+      relationships.characters[
+        npc.name
+      ].likes =
+        npc.likes;
+
+      relationships.characters[
+        npc.name
+      ].dislikes =
+        npc.dislikes;
+    }
+
+    return npcs;
+  },
+
+  compatible: function (
+    playerGender,
+    npcGender,
+    orientation
+  ) {
+    if (
+      playerGender ===
+        "unknown" ||
+      npcGender ===
+        "unknown" ||
+      orientation ===
+        "unknown"
+    ) {
+      return false;
+    }
+
+    if (
+      orientation ===
+        "bisexual" ||
+      orientation ===
+        "pansexual" ||
+      orientation ===
+        "queer"
+    ) {
+      return true;
+    }
+
+    if (
+      orientation ===
+        "heterosexual"
+    ) {
+      return (
+        (
+          npcGender ===
+            "man" &&
+          playerGender ===
+            "woman"
+        ) ||
+        (
+          npcGender ===
+            "woman" &&
+          playerGender ===
+            "man"
+        )
+      );
+    }
+
+    if (
+      orientation ===
+        "homosexual"
+    ) {
+      return (
+        npcGender ===
+        playerGender
+      );
+    }
+
+    return false;
+  },
+
+  romanceMultiplier: function (
+    status
+  ) {
+    if (
+      status ===
+        "single"
+    ) {
+      return 1.00;
+    }
+
+    if (
+      status ===
+        "crush"
+    ) {
+      return 0.45;
+    }
+
+    if (
+      status ===
+        "in-love"
+    ) {
+      return 0.25;
+    }
+
+    if (
+      status ===
+        "relationship"
+    ) {
+      return 0.15;
+    }
+
+    if (
+      status ===
+        "married"
+    ) {
+      return 0.08;
+    }
+
+    return 1.00;
+  },
+
+  friendshipReceptivity: function (
+    friendship
+  ) {
+    const value =
+      Number(
+        friendship || 0
+      );
+
+    if (
+      value <= 0
+    ) {
+      return 0.85;
+    }
+
+    if (
+      value <= 20
+    ) {
+      return 0.95;
+    }
+
+    if (
+      value <= 40
+    ) {
+      return 1.05;
+    }
+
+    if (
+      value <= 60
+    ) {
+      return 1.15;
+    }
+
+    if (
+      value <= 80
+    ) {
+      return 1.30;
+    }
+
+    return 1.45;
+  },
+
+  getRomanticReceptivity: function (
+    friendship
+  ) {
+    const value =
+      Number(
+        friendship || 0
+      );
+
+    if (
+      value <= 10
+    ) {
+      return "Low";
+    }
+
+    if (
+      value <= 30
+    ) {
+      return "Guarded";
+    }
+
+    if (
+      value <= 55
+    ) {
+      return "Moderate";
+    }
+
+    if (
+      value <= 80
+    ) {
+      return "High";
+    }
+
+    return "Very High";
+  },
+
+  nameMatchesText: function (
+    name,
+    text
+  ) {
+    const cleanName =
+      String(
+        name || ""
+      ).trim();
+
+    const source =
+      String(
+        text || ""
+      );
+
+    if (
+      !cleanName ||
+      !source
+    ) {
+      return false;
+    }
+
+    const escaped =
+      cleanName.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+    try {
+      return new RegExp(
+        "\\b" +
+        escaped +
+        "\\b",
+        "i"
+      ).test(
+        source
+      );
+    } catch (
+      error
+    ) {
+      return source
+        .toLowerCase()
+        .includes(
+          cleanName.toLowerCase()
+        );
+    }
+  },
+
+  getFriendshipLevel: function (
+    value
+  ) {
+    if (
+      value <= -61
+    ) {
+      return "Enemy";
+    }
+
+    if (
+      value <= -31
+    ) {
+      return "Persona Non Grata";
+    }
+
+    if (
+      value <= 10
+    ) {
+      return "Neutral";
+    }
+
+    if (
+      value <= 30
+    ) {
+      return "Acquaintance";
+    }
+
+    if (
+      value <= 55
+    ) {
+      return "Friend";
+    }
+
+    if (
+      value <= 80
+    ) {
+      return "Good Friend";
+    }
+
+    return "Best Friends";
+  },
+
+  getRomanceLevel: function (
+    value
+  ) {
+    if (
+      value <= 0
+    ) {
+      return "No Romantic Interest";
+    }
+
+    if (
+      value <= 20
+    ) {
+      return "Mild Attraction";
+    }
+
+    if (
+      value <= 40
+    ) {
+      return "Romantic Interest";
+    }
+
+    if (
+      value <= 65
+    ) {
+      return "Falling in Love";
+    }
+
+    if (
+      value <= 85
+    ) {
+      return "Sweethearts";
+    }
+
+    return "Soulmates";
+  },
+
+  analyzeInteraction: function (
+    input,
+    output
+  ) {
+    const inText =
+      String(
+        input || ""
+      ).toLowerCase();
+
+    const outText =
+      String(
+        output || ""
+      ).toLowerCase();
+
+    return {
+
+      friendshipStrongPositive:
+        this.hasAny(
+          outText,
+          [
+            /\bopens up to you\b/,
+            /\bopens up about (?:their|his|her) past\b/,
+            /\bopens up about (?:their|his|her) feelings\b/,
+            /\bconfides in you\b/,
+            /\bshares a secret with you\b/,
+            /\bshares something deeply personal with you\b/,
+            /\bshares something very personal with you\b/,
+            /\bshares a deeply personal experience\b/,
+            /\bshares a personal experience\b/,
+            /\btrusts you\b/,
+            /\bdeeply trusts you\b/,
+            /\bfeels safe with you\b/,
+            /\bfeels completely safe with you\b/,
+            /\blets you in\b/,
+            /\bdefends you\b/,
+            /\bprotects you\b/,
+            /\bstands up for you\b/,
+            /\bstands by you\b/,
+            /\bcomforts you\b/,
+            /\bsupports you\b/,
+            /\breassures you\b/,
+            /\bcares deeply about you\b/,
+            /\bshows genuine care for you\b/,
+            /\bshows genuine concern for you\b/,
+            /\bmakes a meaningful gesture toward you\b/,
+            /\bmakes a heartfelt gesture toward you\b/,
+            /\bconnects with you on a deeper level\b/,
+            /\bforms a deeper connection with you\b/
+          ]
+        ),
+
+      friendshipMeaningful:
+        this.hasAny(
+          outText,
+          [
+            /\bhas a meaningful conversation with you\b/,
+            /\bhas a heartfelt conversation with you\b/,
+            /\bhas an honest conversation with you\b/,
+            /\btalks honestly with you\b/,
+            /\bshares something important with you\b/,
+            /\bshares something meaningful with you\b/,
+            /\bshares their feelings with you\b/,
+            /\bshares his feelings with you\b/,
+            /\bshares her feelings with you\b/,
+            /\btrusts you with something personal\b/,
+            /\bfeels understood by you\b/,
+            /\bfeels genuinely understood by you\b/,
+            /\bappreciates your support\b/,
+            /\bappreciates your honesty\b/,
+            /\bappreciates your help\b/,
+            /\bappreciates what you did\b/,
+            /\bhelps you\b/,
+            /\bencourages you\b/,
+            /\breassures you\b/,
+            /\bchecks on you\b/,
+            /\bshows concern for you\b/,
+            /\bshows that they care\b/,
+            /\bshows that he cares\b/,
+            /\bshows that she cares\b/,
+            /\basks about your feelings\b/,
+            /\basks how you are doing\b/,
+            /\basks how you're doing\b/,
+            /\bwants to know more about you\b/,
+            /\blistens intently to you\b/,
+            /\blistens closely to you\b/,
+            /\blistens carefully to you\b/,
+            /\bunderstands your point\b/,
+            /\bunderstands you\b/,
+            /\brelates to you\b/
+          ]
+        ),
+
+      friendshipSocial:
+        this.hasAny(
+          outText,
+          [
+            /\blaughs with you\b/,
+            /\blaughs at your joke\b/,
+            /\bgiggles\b/,
+            /\bchuckles\b/,
+            /\bteases you playfully\b/,
+            /\bplayfully teases you\b/,
+            /\bjokes with you\b/,
+            /\bplays along with you\b/,
+            /\bplays along\b/,
+            /\bhas fun with you\b/,
+            /\bhas a good time with you\b/,
+            /\benjoys your company\b/,
+            /\benjoys spending time with you\b/,
+            /\benjoys being around you\b/,
+            /\bhangs out with you\b/,
+            /\bspends time with you\b/,
+            /\blights up\b/,
+            /\btheir eyes light up\b/,
+            /\bhis eyes light up\b/,
+            /\bher eyes light up\b/,
+            /\bbrightens up\b/,
+            /\bbrightens when you\b/,
+            /\bbecomes animated\b/,
+            /\bgets animated\b/,
+            /\bbecomes enthusiastic\b/,
+            /\bgets enthusiastic\b/,
+            /\bbecomes excited\b/,
+            /\bgets excited\b/,
+            /\bbecomes eager\b/,
+            /\bgets eager\b/,
+            /\bsmiles at you\b/,
+            /\bsmiles warmly at you\b/,
+            /\bgrins at you\b/,
+            /\bgrins warmly at you\b/,
+            /\bwelcomes you\b/,
+            /\bis happy to see you\b/,
+            /\bis glad to see you\b/,
+            /\bis happy to talk to you\b/,
+            /\bis glad to talk to you\b/,
+            /\bgets along with you\b/,
+            /\bcooperates with you\b/,
+            /\bgets comfortable around you\b/,
+            /\bfeels comfortable around you\b/,
+            /\bseems at ease around you\b/,
+            /\bis at ease around you\b/
+          ]
+        ),
+
+      friendshipSharedInterest:
+        this.hasAny(
+          outText,
+          [
+            /\btalks about music with you\b/,
+            /\bdiscusses music with you\b/,
+            /\bchats about music with you\b/,
+            /\btalks about movies with you\b/,
+            /\bdiscusses movies with you\b/,
+            /\btalks about games with you\b/,
+            /\bdiscusses games with you\b/,
+            /\btalks about books with you\b/,
+            /\bdiscusses books with you\b/,
+            /\btalks about art with you\b/,
+            /\bdiscusses art with you\b/,
+            /\bshares (?:their|his|her) favorite\b/,
+            /\btells you about (?:their|his|her) favorite\b/,
+            /\bshares an interest with you\b/,
+            /\bshares a hobby with you\b/,
+            /\bdiscovers you both like\b/,
+            /\brealizes you both like\b/,
+            /\brealizes you have something in common\b/,
+            /\bfinds common ground with you\b/,
+            /\bfinds something in common with you\b/
+          ]
+        ),
+
+      friendshipInterest:
+        this.hasAny(
+          outText,
+          [
+            /\bis genuinely interested in what you say\b/,
+            /\bis genuinely interested in your story\b/,
+            /\bis interested in what you say\b/,
+            /\bis intrigued by what you say\b/,
+            /\bis intrigued by your story\b/,
+            /\basks more questions\b/,
+            /\bkeeps asking questions\b/,
+            /\basks follow-up questions\b/,
+            /\bwants to know more\b/,
+            /\bwants to hear more\b/,
+            /\btakes an interest in what you say\b/,
+            /\btakes interest in you\b/,
+            /\bleans in to listen\b/,
+            /\bleans closer to listen\b/,
+            /\blistens intently\b/,
+            /\blistens closely\b/,
+            /\blistens carefully\b/
+          ]
+        ),
+
+      friendshipGeneralPositive:
+        this.hasAny(
+          outText,
+          [
+            /\bthanks you\b/,
+            /\bthanking you\b/,
+            /\bnods appreciatively\b/,
+            /\bnods approvingly\b/,
+            /\bresponds warmly\b/,
+            /\bresponds positively\b/,
+            /\banswers you warmly\b/,
+            /\banswers positively\b/,
+            /\bkeeps the conversation going\b/,
+            /\bcontinues talking with you\b/,
+            /\bcontinues the conversation\b/,
+            /\bkeeps chatting with you\b/,
+            /\bis kind to you\b/,
+            /\bis friendly toward you\b/,
+            /\bis friendly with you\b/,
+            /\bis pleasant toward you\b/,
+            /\bagrees with you\b/,
+            /\bkindly\b/
+          ]
+        ),
+
+      friendshipStrongNegative:
+        this.hasAny(
+          outText,
+          [
+            /\binsults you\b/,
+            /\binsults him\b/,
+            /\binsults her\b/,
+            /\bhumiliates you\b/,
+            /\bhumiliates him\b/,
+            /\bhumiliates her\b/,
+            /\bthreatens you\b/,
+            /\bthreatens him\b/,
+            /\bthreatens her\b/,
+            /\byells at you\b/,
+            /\bshouts at you\b/,
+            /\bscreams at you\b/,
+            /\bscreams angrily\b/,
+            /\bslaps you\b/,
+            /\bhits you\b/,
+            /\bpunches you\b/,
+            /\battacks you\b/,
+            /\btells you to get lost\b/,
+            /\btells you to leave\b/,
+            /\btells you to fuck off\b/,
+            /\btells you to go away\b/,
+            /\bdespises you\b/,
+            /\bhates you\b/,
+            /\bdeeply hates you\b/,
+            /\bpublicly mocks you\b/,
+            /\bdeliberately humiliates you\b/,
+            /\bdeliberately hurts you\b/,
+            /\bturns against you\b/
+          ]
+        ),
+
+      friendshipNegative:
+        this.hasAny(
+          outText,
+          [
+            /\bgets annoyed with you\b/,
+            /\bgets irritated with you\b/,
+            /\bis annoyed with you\b/,
+            /\bis irritated with you\b/,
+            /\bfrowns at you\b/,
+            /\bscowls at you\b/,
+            /\bgrimaces at you\b/,
+            /\brolls (?:their|his|her) eyes\b/,
+            /\bdismisses you\b/,
+            /\bbrushes you off\b/,
+            /\bignores you\b/,
+            /\bignores what you say\b/,
+            /\blooks uncomfortable around you\b/,
+            /\bseems uncomfortable around you\b/,
+            /\bseems tense around you\b/,
+            /\bis tense around you\b/,
+            /\bargues with you\b/,
+            /\bdisagrees angrily with you\b/,
+            /\bgets defensive with you\b/,
+            /\bresents you\b/
+          ]
+        ),
+
+      friendshipDistance:
+        this.hasAny(
+          outText,
+          [
+            /\bwithdraws from you\b/,
+            /\bwithdraws\b/,
+            /\bpulls away from you\b/,
+            /\bpulls away\b/,
+            /\bmoves away from you\b/,
+            /\bsteps away from you\b/,
+            /\bbacks away from you\b/,
+            /\bavoids eye contact with you\b/,
+            /\bavoids looking at you\b/,
+            /\bavoids you\b/,
+            /\bkeeps his distance\b/,
+            /\bkeeps her distance\b/,
+            /\bkeeps their distance\b/,
+            /\bkeeps a distance from you\b/,
+            /\bshuts down\b/,
+            /\bbecomes distant\b/,
+            /\bseems distant\b/,
+            /\bseems withdrawn\b/,
+            /\bturns away from you\b/,
+            /\bwalks away from you\b/,
+            /\bleaves the conversation\b/,
+            /\btries to end the conversation\b/,
+            /\btries to avoid the subject\b/,
+            /\bchanges the subject to avoid\b/
+          ]
+        ),
+
+      romancePositive:
+        this.hasAny(
+          outText,
+          [
+            /\bflirts with you\b/,
+            /\bflirts back\b/,
+            /\bflirtatiously\b/,
+            /\bkisses you\b/,
+            /\bkisses him\b/,
+            /\bkisses her\b/,
+            /\breturns your kiss\b/,
+            /\breturns the kiss\b/,
+            /\basks you out\b/,
+            /\basks you on a date\b/,
+            /\badmits (?:their|his|her) attraction\b/,
+            /\badmits attraction to you\b/,
+            /\badmits (?:their|his|her) feelings for you\b/,
+            /\badmits romantic feelings\b/,
+            /\bconfesses (?:their|his|her) feelings\b/,
+            /\bconfesses romantic feelings\b/,
+            /\bhas feelings for you\b/,
+            /\bis attracted to you\b/,
+            /\bhas romantic feelings for you\b/,
+            /\bshows romantic interest in you\b/,
+            /\bhas romantic interest in you\b/,
+            /\bfalls in love with you\b/,
+            /\bis falling in love with you\b/,
+            /\bdesires you romantically\b/,
+            /\bwants to be with you romantically\b/,
+            /\baffectionate hug\b/,
+            /\bhugs you affectionately\b/,
+            /\binitiates a romantic moment\b/,
+            /\binitiates romantic contact\b/
+          ]
+        ),
+
+      romanceSoftPositive:
+        this.hasAny(
+          outText,
+          [
+            /\bblushes\b/,
+            /\bturns red\b/,
+            /\bgets shy around you\b/,
+            /\bsmiles shyly at you\b/,
+            /\blooks away shyly\b/,
+            /\blooks away bashfully\b/,
+            /\bseems shy\b/,
+            /\bseems flustered\b/,
+            /\bbecomes flustered\b/,
+            /\bgets flustered\b/,
+            /\bseems bashful\b/,
+            /\bseems nervous around you\b/,
+            /\bholds your gaze\b/,
+            /\bholds eye contact with you\b/,
+            /\bleans closer to you\b/,
+            /\bmoves closer to you\b/,
+            /\bsits closer to you\b/,
+            /\bstays close to you\b/,
+            /\bteases you flirtatiously\b/,
+            /\bplayfully teases you\b/,
+            /\bseems charmed\b/,
+            /\blooks charmed\b/
+          ]
+        ),
+
+      romanceNegative:
+        this.hasAny(
+          outText,
+          [
+            /\brejects your advances\b/,
+            /\bturns you down\b/,
+            /\brejects you\b/,
+            /\brejects the romantic advance\b/,
+            /\brejects the advance\b/,
+            /\bis not interested in you\b/,
+            /\bisn't interested in you\b/,
+            /\bis not romantically interested\b/,
+            /\bisn't romantically interested\b/,
+            /\bdoes not feel that way\b/,
+            /\bdoesn't feel that way\b/,
+            /\bdoes not reciprocate\b/,
+            /\bdoesn't reciprocate\b/,
+            /\bdoes not return your feelings\b/,
+            /\bdoesn't return your feelings\b/,
+            /\bonly sees you as a friend\b/,
+            /\basks you to stop\b/,
+            /\btells you to stop\b/,
+            /\brefuses your romantic advance\b/,
+            /\brefuses the kiss\b/,
+            /\bpulls away from the kiss\b/,
+            /\bpulls away from you\b/
+          ]
+        ),
+
+      playerFlirt:
+        this.hasAny(
+          inText,
+          [
+            /\bflirt\b/,
+            /\bflirting\b/,
+            /\bflirted\b/,
+            /\bhit on\b/,
+            /\bmake a pass at\b/,
+            /\bmake a move on\b/,
+            /\bromantically\b/,
+            /\bromantic\b/,
+            /\bkiss\b/,
+            /\bkisses\b/,
+            /\bkissed\b/,
+            /\bask .* out\b/,
+            /\bask .* on a date\b/,
+            /\bask .* for a date\b/,
+            /\btease\b/,
+            /\bteases\b/,
+            /\bteased\b/
+          ]
+        ),
+
+      infidelity:
+        this.hasAny(
+          outText,
+          [
+            /\bcheats on\b/,
+            /\bcheated on\b/,
+            /\bis cheating on\b/,
+            /\bcheating on\b/,
+            /\bhas an affair\b/,
+            /\bis having an affair\b/,
+            /\bhaving an affair\b/,
+            /\bis unfaithful\b/,
+            /\bunfaithful to\b/,
+            /\bbetrays you\b/,
+            /\bbetrayal\b/,
+            /\bdeceives you\b/,
+            /\bdeception\b/
+          ]
+        )
+    };
+  },
+
+  getFriendshipDelta: function (
+    signals
+  ) {
+    let delta =
+      0;
+
+    if (
+      signals.friendshipStrongPositive
+    ) {
+      delta += 1.5;
+
+    } else if (
+      signals.friendshipMeaningful
+    ) {
+      delta += 0.8;
+
+    } else if (
+      signals.friendshipSocial
+    ) {
+      delta += 0.5;
+
+    } else if (
+      signals.friendshipSharedInterest ||
+      signals.friendshipInterest
+    ) {
+      delta += 0.35;
+
+    } else if (
+      signals.friendshipGeneralPositive
+    ) {
+      delta += 0.25;
+    }
+
+    if (
+      signals.friendshipStrongNegative
+    ) {
+      delta -= 2.0;
+
+    } else if (
+      signals.friendshipNegative ||
+      signals.friendshipDistance
+    ) {
+      delta -= 0.9;
+    }
+
+    return delta;
+  },
+
+  countPreviousPreferenceConflicts: function (
+    preference,
+    npc,
+    currentInput
+  ) {
+    const historyActions =
+      this.getHistoryActions();
+
+    if (
+      historyActions.length === 0
+    ) {
+      return 0;
+    }
+
+    let count =
+      0;
+
+    const currentNormalized =
+      String(
+        currentInput || ""
+      )
+        .toLowerCase();
+
+    for (
+      const action
+      of historyActions
+    ) {
+      const historyText =
+        String(
+          action || ""
+        )
+          .toLowerCase();
+
+      if (!historyText) {
+        continue;
+      }
+
+      if (
+        !this.preferenceMatchesInput(
+          preference,
+          historyText
+        )
+      ) {
+        continue;
+      }
+
+      const attitude =
+        this.getPlayerPreferenceAttitude(
+          historyText
+        );
+
+      if (
+        attitude.attitude ===
+        "positive"
+      ) {
+        count++;
+      }
+    }
+
+    return count;
+  },
+
+  getPreferenceEffect: function (
+    npc,
+    input
+  ) {
+    const source =
+      String(
+        input || ""
+      );
+
+    const profile = {
+      hobbies:
+        Array.isArray(
+          npc.hobbies
+        )
+          ? npc.hobbies
+          : [],
+
+      likes:
+        Array.isArray(
+          npc.likes
+        )
+          ? npc.likes
+          : [],
+
+      dislikes:
+        Array.isArray(
+          npc.dislikes
+        )
+          ? npc.dislikes
+          : []
+    };
+
+    const attitude =
+      this.getPlayerPreferenceAttitude(
+        source
+      );
+
+    const positivePreferencePool =
+      []
+        .concat(
+          profile.hobbies
+        )
+        .concat(
+          profile.likes
+        );
+
+    const positiveMatches =
+      this.findPreferenceMatches(
+        positivePreferencePool,
+        source
+      );
+
+    if (
+      positiveMatches.length > 0 &&
+      attitude.attitude !==
+        "negative"
+    ) {
+      let bonus =
+        this.preferences
+          .LIKE_BONUS;
+
+      if (
+        attitude.strongPositive ||
+        attitude.defense
+      ) {
+        bonus =
+          this.preferences
+            .STRONG_LIKE_BONUS;
+      }
+
+      return {
+        bonus:
+          bonus,
+        reason:
+          "positive-preference",
+        matched:
+          positiveMatches[0]
+      };
+    }
+
+    const dislikeMatches =
+      this.findPreferenceMatches(
+        profile.dislikes,
+        source
+      );
+
+    if (
+      dislikeMatches.length === 0
+    ) {
+      return {
+        bonus: 0,
+        reason: "",
+        matched: ""
+      };
+    }
+
+    if (
+      attitude.attitude !==
+      "positive"
+    ) {
+      return {
+        bonus: 0,
+        reason: "",
+        matched: ""
+      };
+    }
+
+    const matchedDislike =
+      dislikeMatches[0];
+
+    const previousConflicts =
+      this.countPreviousPreferenceConflicts(
+        matchedDislike,
+        npc,
+        source
+      );
+
+    if (
+      previousConflicts >= 2
+    ) {
+      return {
+        bonus:
+          this.preferences
+            .DISLIKE_REPEATED,
+        reason:
+          "repeated-dislike-conflict",
+        matched:
+          matchedDislike
+      };
+    }
+
+    if (
+      previousConflicts >= 1 ||
+      attitude.defense
+    ) {
+      return {
+        bonus:
+          this.preferences
+            .DISLIKE_INSISTENCE,
+        reason:
+          "dislike-insistence",
+        matched:
+          matchedDislike
+      };
+    }
+
+    return {
+      bonus:
+        this.preferences
+          .DISLIKE_CONFLICT,
+      reason:
+        "dislike-conflict",
+      matched:
+        matchedDislike
+    };
+  },
+
+  updateNPC: function (
+    npc,
+    input,
+    output
+  ) {
+    const relationships =
+      this.init();
+
+    const data =
+      relationships.characters[
+        npc.name
+      ];
+
+    if (!data) {
+      return;
+    }
+
+    const signals =
+      this.analyzeInteraction(
+        input,
+        output
+      );
+
+    let friendshipChange =
+      this.getFriendshipDelta(
+        signals
+      );
+
+    const preferenceEffect =
+      this.getPreferenceEffect(
+        npc,
+        input
+      );
+
+    friendshipChange +=
+      preferenceEffect.bonus;
+
+    let romanceChange =
+      0;
+
+    const compatible =
+      this.compatible(
+        relationships.playerGender,
+        npc.gender,
+        npc.orientation
+      );
+
+    if (!compatible) {
+      data.romance =
+        0;
+
+    } else {
+
+      const receptivity =
+        this.friendshipReceptivity(
+          data.friendship
+        );
+
+      const statusMultiplier =
+        this.romanceMultiplier(
+          npc.romanticStatus
+        );
+
+      if (
+        signals.romancePositive
+      ) {
+        romanceChange +=
+          1.5 *
+          statusMultiplier *
+          receptivity;
+
+      } else if (
+        signals.romanceSoftPositive &&
+        signals.playerFlirt
+      ) {
+        romanceChange +=
+          0.60 *
+          statusMultiplier *
+          receptivity;
+      }
+
+      if (
+        signals.romanceNegative
+      ) {
+        romanceChange -=
+          2.5;
+      }
+    }
+
+    if (
+      signals.infidelity
+    ) {
+      friendshipChange -=
+        2.0;
+
+      if (
+        compatible
+      ) {
+        romanceChange -=
+          2.5;
+      }
+    }
+
+    data.friendship =
+      Math.max(
+        -100,
+        Math.min(
+          100,
+          Number(
+            data.friendship || 0
+          ) +
+          friendshipChange
+        )
+      );
+
+    if (
+      compatible
+    ) {
+      data.romance =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(
+              data.romance || 0
+            ) +
+            romanceChange
+          )
+        );
+
+    } else {
+      data.romance =
+        0;
+    }
+  },
+
+  getHistoryActions: function () {
+    if (
+      !Array.isArray(
+        history
+      )
+    ) {
+      return [];
+    }
+
+    return history
+      .slice(
+        -this.tracker
+          .MAX_HISTORY_ACTIONS
+      )
+      .map(
+        action => {
+          if (!action) {
+            return "";
+          }
+
+          return String(
+            action.text || ""
+          );
+        }
+      )
+      .filter(Boolean);
+  },
+
+  uniqueNamesInText: function (
+    text,
+    npcs
+  ) {
+    const source =
+      String(
+        text || ""
+      );
+
+    const found =
+      [];
+
+    for (
+      const npc
+      of npcs || []
+    ) {
+      if (
+        !npc ||
+        !npc.name
+      ) {
+        continue;
+      }
+
+      const fullName =
+        String(
+          npc.name
+        ).trim();
+
+      const firstName =
+        fullName
+          .split(
+            /\s+/
+          )[0];
+
+      let matched =
+        this.nameMatchesText(
+          fullName,
+          source
+        );
+
+      if (
+        !matched &&
+        firstName.length >=
+          this.tracker.MIN_NAME_LENGTH
+      ) {
+        matched =
+          this.nameMatchesText(
+            firstName,
+            source
+          );
+      }
+
+      if (
+        matched &&
+        !found.includes(
+          npc.name
+        )
+      ) {
+        found.push(
+          npc.name
+        );
+      }
+    }
+
+    return found;
+  },
+
+  resolveExplicitTarget: function (
+    input,
+    activeNames,
+    npcs
+  ) {
+    const source =
+      String(
+        input || ""
+      );
+
+    const candidates =
+      [];
+
+    for (
+      const activeName
+      of activeNames || []
+    ) {
+      const npc =
+        (npcs || []).find(
+          x =>
+            x.name ===
+            activeName
+        );
+
+      if (!npc) {
+        continue;
+      }
+
+      if (
+        this.nameMatchesText(
+          npc.name,
+          source
+        )
+      ) {
+        candidates.push(
+          npc.name
+        );
+        continue;
+      }
+
+      const firstName =
+        npc.name
+          .split(/\s+/)[0];
+
+      if (
+        firstName.length >=
+          this.tracker.MIN_NAME_LENGTH &&
+        this.nameMatchesText(
+          firstName,
+          source
+        )
+      ) {
+        candidates.push(
+          npc.name
+        );
+      }
+    }
+
+    return candidates.length ===
+      1
+      ? candidates[0]
+      : "";
+  },
+
+  updateSceneTracker: function (
+    currentInput,
+    npcs
+  ) {
+    const relationships =
+      this.init();
+
+    const tracker =
+      relationships
+        .sceneTracker;
+
+    const input =
+      String(
+        currentInput || ""
+      );
+
+    const recentHistory =
+      this.getHistoryActions();
+
+    const historyText =
+      recentHistory.join(
+        "\n"
+      );
+
+    const currentInputNames =
+      this.uniqueNamesInText(
+        input,
+        npcs
+      );
+
+    const recentHistoryNames =
+      this.uniqueNamesInText(
+        historyText,
+        npcs
+      );
+
+    const currentCombinedNames =
+      this.uniqueNamesInText(
+        input +
+        "\n" +
+        historyText,
+        npcs
+      );
+
+    const explicitCurrentTarget =
+      this.resolveExplicitTarget(
+        input,
+        currentCombinedNames,
+        npcs
+      );
+
+    let activeNames =
+      [];
+
+    if (
+      currentInputNames.length > 0
+    ) {
+      activeNames =
+        currentInputNames.slice();
+
+      for (
+        const name
+        of recentHistoryNames
+      ) {
+        if (
+          !activeNames.includes(
+            name
+          )
+        ) {
+          activeNames.push(
+            name
+          );
+        }
+      }
+
+    } else if (
+      recentHistoryNames.length >
+      0
+    ) {
+      activeNames =
+        recentHistoryNames.slice();
+
+    } else if (
+      tracker.activeNames.length >
+        0 &&
+      tracker.turnsSinceDetection <
+        this.tracker
+          .ACTIVE_PERSIST_TURNS
+    ) {
+      activeNames =
+        tracker.activeNames.slice();
+    }
+
+    activeNames =
+      activeNames.filter(
+        (
+          name,
+          index,
+          arr
+        ) =>
+          arr.indexOf(name) ===
+          index
+      );
+
+    if (
+      currentCombinedNames.length >
+      0
+    ) {
+      tracker.lastDetectedNames =
+        currentCombinedNames.slice();
+
+      tracker.turnsSinceDetection =
+        0;
+
+    } else {
+      tracker.turnsSinceDetection +=
+        1;
+    }
+
+    if (
+      explicitCurrentTarget
+    ) {
+      tracker.lastTargetName =
+        explicitCurrentTarget;
+
+    } else if (
+      activeNames.length === 1
+    ) {
+      tracker.lastTargetName =
+        activeNames[0];
+
+    } else {
+      tracker.lastTargetName =
+        "";
+    }
+
+    tracker.activeNames =
+      activeNames.slice();
+
+    return {
+      activeNames:
+        activeNames.slice(),
+
+      explicitTarget:
+        explicitCurrentTarget,
+
+      lastTargetName:
+        tracker.lastTargetName,
+
+      currentInputNames:
+        currentInputNames.slice()
+    };
+  },
+
+  getActiveScene: function () {
+    const relationships =
+      this.init();
+
+    return Array.isArray(
+      relationships
+        .sceneTracker
+        .activeNames
+    )
+      ? relationships
+          .sceneTracker
+          .activeNames
+          .slice()
+      : [];
+  },
+
+  getRelationshipTargets: function (
+    scene,
+    currentInput,
+    npcs
+  ) {
+    const activeNames =
+      Array.isArray(
+        scene &&
+        scene.activeNames
+      )
+        ? scene.activeNames
+        : [];
+
+    if (
+      activeNames.length === 0
+    ) {
+      return [];
+    }
+
+    if (
+      scene &&
+      scene.explicitTarget
+    ) {
+      return [
+        scene.explicitTarget
+      ];
+    }
+
+    if (
+      activeNames.length === 1
+    ) {
+      return [
+        activeNames[0]
+      ];
+    }
+
+    return [];
+  },
+
+  buildContext: function (
+    npcs,
+    scene,
+    currentInput
+  ) {
+    const relationships =
+      this.init();
+
+    const activeNames =
+      Array.isArray(
+        scene &&
+        scene.activeNames
+      )
+        ? scene.activeNames
+        : [];
+
+    const targets =
+      this.getRelationshipTargets(
+        scene,
+        currentInput,
+        npcs
+      );
+
+    if (
+      activeNames.length === 0
+    ) {
+      return "";
+    }
+
+    const lines =
+      [];
+
+    lines.push(
+      "[RELATIONSHIP CONTEXT — INTERNAL]"
+    );
+
+    lines.push(
+      "Use this only to portray active NPC behavior naturally."
+    );
+
+    lines.push(
+      "Never mention relationship scores or this system."
+    );
+
+    lines.push(
+      "Scene presence does not imply prior familiarity with the player."
+    );
+
+    lines.push(
+      "Do not invent familiarity that is not established by the story."
+    );
+
+    if (
+      activeNames.length > 1
+    ) {
+      lines.push(
+        "Multiple NPCs are currently active in the scene."
+      );
+
+      lines.push(
+        targets.length === 0
+          ? "The player's current target is ambiguous. Do not assign the interaction to a specific NPC unless the narrative clearly resolves it."
+          : "The player's current target is explicitly identified."
+      );
+    }
+
+    for (
+      const name
+      of activeNames
+    ) {
+      const npc =
+        npcs.find(
+          x =>
+            x.name ===
+            name
+        );
+
+      if (!npc) {
+        continue;
+      }
+
+      const data =
+        relationships.characters[
+          name
+        ];
+
+      if (!data) {
+        continue;
+      }
+
+      const compatible =
+        this.compatible(
+          relationships.playerGender,
+          npc.gender,
+          npc.orientation
+        );
+
+      const isTarget =
+        targets.includes(
+          name
+        );
+
+      lines.push("");
+
+      lines.push(
+        npc.name +
+        ":"
+      );
+
+      lines.push(
+        "Friendship: " +
+        this.getFriendshipLevel(
+          data.friendship
+        ) +
+        "."
+      );
+
+      lines.push(
+        "Romance: " +
+        this.getRomanceLevel(
+          data.romance
+        ) +
+        "."
+      );
+
+      lines.push(
+        "Romantic receptivity from friendship: " +
+        this.getRomanticReceptivity(
+          data.friendship
+        ) +
+        "."
+      );
+
+      lines.push(
+        "Romantic compatibility: " +
+        (
+          compatible
+            ? "POSSIBLE"
+            : "IMPOSSIBLE"
+        ) +
+        "."
+      );
+
+      lines.push(
+        "Interaction target: " +
+        (
+          isTarget
+            ? "YES"
+            : "NO"
+        ) +
+        "."
+      );
+
+      if (
+        !isTarget &&
+        activeNames.length > 1
+      ) {
+        lines.push(
+          "Do not assume the player's ambiguous action is directed at this NPC."
+        );
+      }
+
+      if (
+        !compatible
+      ) {
+        lines.push(
+          "ROMANCE LOCK: This NPC cannot develop romantic or sexual attraction toward the player. Do not portray flirting, affection, intimacy, or closeness as reciprocal romantic attraction."
+        );
+      }
+
+      if (
+        npc.romanticStatus ===
+        "crush"
+      ) {
+        lines.push(
+          "Existing crush on " +
+          npc.romanticTarget +
+          ". Romance with the player is slower and more complicated."
+        );
+      }
+
+      if (
+        npc.romanticStatus ===
+        "in-love"
+      ) {
+        lines.push(
+          "Already in love with " +
+          npc.romanticTarget +
+          ". Romance with the player is very difficult."
+        );
+      }
+
+      if (
+        npc.romanticStatus ===
+        "relationship"
+      ) {
+        lines.push(
+          "Already in a relationship with " +
+          npc.romanticTarget +
+          ". Any attraction to the player is conflicted and difficult."
+        );
+      }
+
+      if (
+        npc.romanticStatus ===
+        "married"
+      ) {
+        lines.push(
+          "Married to " +
+          npc.romanticTarget +
+          ". Any attraction to the player is highly difficult and consequential."
+        );
+      }
+
+      lines.push(
+        "Friendship and romance are independent."
+      );
+
+      lines.push(
+        "Romance describes this NPC's feelings toward the player, not the player's feelings."
+      );
+    }
+
+    lines.push("");
+
+    lines.push(
+      "[END RELATIONSHIP CONTEXT]"
+    );
+
+    return lines.join(
+      "\n"
+    );
+  }
+};
+
+
+const RELStatus = {
+
+  CONFIG_KEY:
+    "__BASIC_REL_CONFIG__",
+
+  CONFIG_TYPE:
+    "BASIC_REL_CONFIG",
+
+  STATUS_TYPE:
+    "BASIC_REL_STATUS",
+
+  WATERMARK:
+    "Basic REL v3 • @Nynaleath",
+
+  round: function (
+    value
+  ) {
+    return Math.round(
+      Number(
+        value || 0
+      ) *
+      10
+    ) / 10;
+  },
+
+  normalizeName: function (
+    value
+  ) {
+    return String(
+      value || ""
+    )
+      .trim()
+      .replace(
+        /\s+/g,
+        " "
+      );
+  },
+
+  cleanCharacterName: function (
+    value
+  ) {
+    let name =
+      this.normalizeName(
+        value
+      );
+
+    name =
+      name
+        .replace(
+          /^[-•*]\s*/,
+          ""
+        )
+        .trim();
+
+    return name;
+  },
+
+  getConfigCard: function (
+    cards
+  ) {
+    for (
+      const card
+      of cards || []
+    ) {
+
+      const keys =
+        String(
+          card.keys || ""
+        );
+
+      const keyList =
+        keys
+          .split(",")
+          .map(
+            x =>
+              x.trim()
+          );
+
+      const singularKey =
+        String(
+          card.key || ""
+        ).trim();
+
+      if (
+        keyList.includes(
+          this.CONFIG_KEY
+        ) ||
+        singularKey ===
+          this.CONFIG_KEY ||
+        String(
+          card.type || ""
+        ) ===
+          this.CONFIG_TYPE
+      ) {
+        return card;
+      }
+    }
+
+    return null;
+  },
+
+  ensureManualEditSection: function (
+    config
+  ) {
+    if (!config) {
+      return null;
+    }
+
+    let entry =
+      String(
+        config.entry || ""
+      );
+
+    if (
+      !entry.trim()
+    ) {
+      return config;
+    }
+
+    entry =
+      entry.replace(
+        /BASIC REL v2/g,
+        "BASIC REL v3"
+      );
+
+    entry =
+      entry.replace(
+        /Basic REL v2\s+•\s+@Nynaleath/g,
+        this.WATERMARK
+      );
+
+    if (
+      /^\s*Manual\s+Stat\s+Edit\s*:/im.test(
+        entry
+      )
+    ) {
+      if (
+        config.entry !==
+        entry
+      ) {
+        const index =
+          storyCards.indexOf(
+            config
+          );
+
+        if (
+          index >= 0
+        ) {
+          updateStoryCard(
+            index,
+            String(
+              config.keys ||
+              this.CONFIG_KEY
+            ),
+            entry,
+            String(
+              config.type ||
+              this.CONFIG_TYPE
+            )
+          );
+
+          config.entry =
+            entry;
+        }
+      }
+
+      return config;
+    }
+
+    const manualSection =
+      "\n\n" +
+      "Manual Stat Edit:\n" +
+      "Character:\n" +
+      "Apply: no\n" +
+      "Friendship: unchanged\n" +
+      "Romance: unchanged\n";
+
+    const watermarkPattern =
+      /(?:Basic REL v\d+\s+•\s+@Nynaleath)/i;
+
+    if (
+      watermarkPattern.test(
+        entry
+      )
+    ) {
+      entry =
+        entry.replace(
+          watermarkPattern,
+          manualSection +
+          "\n" +
+          this.WATERMARK
+        );
+    } else {
+      entry +=
+        manualSection +
+        "\n" +
+        this.WATERMARK;
+    }
+
+    const index =
+      storyCards.indexOf(
+        config
+      );
+
+    if (
+      index >= 0
+    ) {
+      updateStoryCard(
+        index,
+        String(
+          config.keys ||
+          this.CONFIG_KEY
+        ),
+        entry,
+        String(
+          config.type ||
+          this.CONFIG_TYPE
+        )
+      );
+
+      config.entry =
+        entry;
+    }
+
+    return config;
+  },
+
+  ensureConfigCard: function () {
+    const existing =
+      this.getConfigCard(
+        storyCards
+      );
+
+    if (existing) {
+      return this.ensureManualEditSection(
+        existing
+      );
+    }
+
+    const entry =
+      "BASIC REL v3 — Relationship Status Configuration\n\n" +
+
+      "Tracked Characters:\n\n" +
+
+      "INSTRUCTIONS:\n" +
+      "Enter the exact names of the NPCs you want to track.\n" +
+      "Separate multiple names with commas.\n\n" +
+
+      "Example:\n" +
+      "Character A, Character B, Character C\n\n" +
+
+      "Only characters listed in Tracked Characters will receive a visible Relationship Status card.\n\n" +
+
+      "You can edit this card at any time during the adventure.\n" +
+      "For best compatibility, place the names in the Story Card Notes field.\n" +
+      "If Notes are unavailable to the script, use the Tracked Characters section in this Entry instead.\n\n" +
+
+      "The Basic REL system continues tracking relationship data internally even when a character is not displayed.\n\n" +
+
+      "Manual Stat Edit:\n" +
+      "Character:\n" +
+      "Apply: no\n" +
+      "Friendship: unchanged\n" +
+      "Romance: unchanged\n\n" +
+
+      this.WATERMARK;
+
+    addStoryCard(
+      this.CONFIG_KEY,
+      entry,
+      this.CONFIG_TYPE
+    );
+
+    return this.getConfigCard(
+      storyCards
+    );
+  },
+
+  extractNamesFromText: function (
+    text
+  ) {
+    const source =
+      String(
+        text || ""
+      );
+
+    if (
+      !source.trim()
+    ) {
+      return [];
+    }
+
+    const names =
+      [];
+
+    const fragments =
+      source.split(
+        /[,;\n]+/
+      );
+
+    for (
+      const fragment
+      of fragments
+    ) {
+      const name =
+        this.cleanCharacterName(
+          fragment
+        );
+
+      if (!name) {
+        continue;
+      }
+
+      if (
+        !names.some(
+          existing =>
+            existing
+              .toLowerCase() ===
+            name.toLowerCase()
+        )
+      ) {
+        names.push(
+          name
+        );
+      }
+    }
+
+    return names;
+  },
+
+  getTrackedCharacters: function () {
+    const config =
+      this.ensureConfigCard();
+
+    if (!config) {
+      return [];
+    }
+
+    const notes =
+      String(
+        config.notes || ""
+      ).trim();
+
+    if (notes) {
+      const noteNames =
+        this.extractNamesFromText(
+          notes
+        );
+
+      if (
+        noteNames.length > 0
+      ) {
+        return noteNames;
+      }
+    }
+
+    const entry =
+      String(
+        config.entry || ""
+      );
+
+    const trackedMatch =
+      entry.match(
+        /Tracked Characters\s*:\s*([\s\S]*?)(?=\n\s*(?:INSTRUCTIONS|Manual Stat Edit)\s*:)/i
+      );
+
+    if (
+      trackedMatch &&
+      trackedMatch[1]
+    ) {
+      return this.extractNamesFromText(
+        trackedMatch[1]
+      );
+    }
+
+    const lines =
+      entry.split(
+        /\r?\n/
+      );
+
+    let collecting =
+      false;
+
+    const collected =
+      [];
+
+    for (
+      const line
+      of lines
+    ) {
+      if (
+        /^\s*Tracked Characters\s*:\s*$/i
+          .test(line)
+      ) {
+        collecting =
+          true;
+
+        continue;
+      }
+
+      if (
+        collecting &&
+        (
+          /^\s*INSTRUCTIONS\s*:\s*$/i
+            .test(line) ||
+          /^\s*Manual Stat Edit\s*:\s*$/i
+            .test(line)
+        )
+      ) {
+        break;
+      }
+
+      if (
+        collecting &&
+        line.trim()
+      ) {
+        collected.push(
+          line.trim()
+        );
+      }
+    }
+
+    return this.extractNamesFromText(
+      collected.join(
+        "\n"
+      )
+    );
+  },
+
+  findTrackedNPC: function (
+    trackedName,
+    npcs
+  ) {
+    const target =
+      this.normalizeName(
+        trackedName
+      ).toLowerCase();
+
+    for (
+      const npc
+      of npcs || []
+    ) {
+      if (
+        npc.name
+          .toLowerCase() ===
+        target
+      ) {
+        return npc;
+      }
+    }
+
+    const firstMatches =
+      (npcs || []).filter(
+        npc =>
+          npc.name
+            .split(/\s+/)[0]
+            .toLowerCase() ===
+          target
+      );
+
+    if (
+      firstMatches.length ===
+      1
+    ) {
+      return firstMatches[0];
+    }
+
+    const partMatches =
+      (npcs || []).filter(
+        npc =>
+          npc.name
+            .split(/\s+/)
+            .some(
+              part =>
+                part.toLowerCase() ===
+                target
+            )
+      );
+
+    if (
+      partMatches.length ===
+      1
+    ) {
+      return partMatches[0];
+    }
+
+    return null;
+  },
+
+  getStatusKey: function (
+    characterName
+  ) {
+    const clean =
+      this.normalizeName(
+        characterName
+      )
+        .toUpperCase()
+        .replace(
+          /[^A-Z0-9]+/g,
+          "_"
+        )
+        .replace(
+          /^_+|_+$/g,
+          ""
+        );
+
+    return (
+      "__BASIC_REL_STATUS_" +
+      clean +
+      "__"
+    );
+  },
+
+  getStatusCard: function (
+    characterName
+  ) {
+    const key =
+      this.getStatusKey(
+        characterName
+      );
+
+    for (
+      let index = 0;
+      index < storyCards.length;
+      index++
+    ) {
+      const card =
+        storyCards[index];
+
+      const keys =
+        String(
+          card.keys || ""
+        );
+
+      const keyList =
+        keys
+          .split(",")
+          .map(
+            x =>
+              x.trim()
+          );
+
+      if (
+        keyList.includes(
+          key
+        )
+      ) {
+        return {
+          card:
+            card,
+          index:
+            index
+        };
+      }
+
+      if (
+        String(
+          card.type || ""
+        ) ===
+          this.STATUS_TYPE &&
+        String(
+          card.entry || ""
+        ).startsWith(
+          characterName +
+          " — Relationship"
+        )
+      ) {
+        return {
+          card:
+            card,
+          index:
+            index
+        };
+      }
+    }
+
+    return null;
+  },
+
+  buildEntry: function (
+    characterName,
+    character,
+    npc
+  ) {
+    const friendship =
+      this.round(
+        character.friendship
+      );
+
+    const romance =
+      this.round(
+        character.romance
+      );
+
+    const activeNames =
+      typeof REL !==
+        "undefined" &&
+      typeof REL.getActiveScene ===
+        "function"
+        ? REL.getActiveScene()
+        : [];
+
+    const isActive =
+      activeNames.includes(
+        characterName
+      );
+
+    const activeMarker =
+      isActive
+        ? "👥💕 ACTIVE\n\n"
+        : "";
+
+    return (
+      characterName +
+      " — Relationship\n\n" +
+
+      activeMarker +
+
+      "Friendship: " +
+      friendship +
+      " — " +
+      REL.getFriendshipLevel(
+        friendship
+      ) +
+      "\n" +
+
+      "Romance: " +
+      romance +
+      " — " +
+      REL.getRomanceLevel(
+        romance
+      ) +
+      "\n\n" +
+
+      "This Relationship Status card is automatically generated by Basic REL v3.\n" +
+      "Friendship and romance are tracked independently.\n" +
+      "Romance represents " +
+      characterName +
+      "'s feelings toward the player.\n\n" +
+
+      "Tracked through the Basic REL v3 configuration card.\n\n" +
+
+      this.WATERMARK
+    );
+  },
+
+  update: function (
+    characterName,
+    npc
+  ) {
+    const relationships =
+      REL.init();
+
+    const character =
+      relationships.characters[
+        characterName
+      ];
+
+    if (!character) {
+      return;
+    }
+
+    const key =
+      this.getStatusKey(
+        characterName
+      );
+
+    const entry =
+      this.buildEntry(
+        characterName,
+        character,
+        npc
+      );
+
+    const existing =
+      this.getStatusCard(
+        characterName
+      );
+
+    if (existing) {
+
+      updateStoryCard(
+        existing.index,
+        key,
+        entry,
+        this.STATUS_TYPE
+      );
+
+    } else {
+
+      addStoryCard(
+        key,
+        entry,
+        this.STATUS_TYPE
+      );
+    }
+  },
+
+  updateTrackedStatuses: function (
+    npcs
+  ) {
+    const trackedNames =
+      this.getTrackedCharacters();
+
+    if (
+      trackedNames.length === 0
+    ) {
+      return;
+    }
+
+    for (
+      const trackedName
+      of trackedNames
+    ) {
+      const npc =
+        this.findTrackedNPC(
+          trackedName,
+          npcs
+        );
+
+      if (!npc) {
+        continue;
+      }
+
+      this.update(
+        npc.name,
+        npc
+      );
+    }
+  }
+};
