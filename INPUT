@@ -1,0 +1,50 @@
+/* =========================================================
+   BASIC REL ES v1 — INPUT HOOK
+   VERSION: 1.0
+   HOOK: INPUT
+   ========================================================= */
+
+const modifier = (text) => {
+
+  if (
+    typeof REL === "undefined"
+  ) {
+    return {
+      text
+    };
+  }
+
+  const relationships = REL.init();
+
+  if (
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.ensureConfigCard();
+  }
+
+  const relationshipNPCs =
+    REL.syncCharacters(
+      storyCards
+    );
+
+  const manualEdit =
+    REL.applyManualEdit();
+
+  if (
+    manualEdit.applied &&
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.update(
+      manualEdit.name
+    );
+  }
+
+  relationships.lastInput =
+    String(text || "");
+
+  return {
+    text
+  };
+};
+
+modifier(text);
