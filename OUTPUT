@@ -1,0 +1,112 @@
+/* =========================================================
+   BASIC REL v1 — OUTPUT HOOK
+   VERSION: 1.0
+   HOOK: OUTPUT
+   ========================================================= */
+
+const modifier = (text) => {
+
+  if (
+    typeof REL === "undefined"
+  ) {
+    return {
+      text
+    };
+  }
+
+  const relationships =
+    REL.init();
+
+  if (
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.ensureConfigCard();
+  }
+
+  const npcs =
+    REL.syncCharacters(
+      storyCards
+    );
+
+  const manualEdit =
+    REL.applyManualEdit();
+
+  if (
+    manualEdit.applied &&
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.update(
+      manualEdit.name
+    );
+  }
+
+  const input =
+    relationships.lastInput || "";
+
+  const output =
+    String(text || "");
+
+  if (!output) {
+    return {
+      text
+    };
+  }
+
+  const scene = {
+    activeNames:
+      REL.getActiveScene(),
+    explicitTarget: ""
+  };
+
+  const explicitTarget =
+    REL.resolveExplicitTarget(
+      input,
+      scene.activeNames,
+      npcs
+    );
+
+  scene.explicitTarget =
+    explicitTarget;
+
+  const relationshipTargets =
+    REL.getRelationshipTargets(
+      scene,
+      input,
+      npcs
+    );
+
+  for (
+    const name
+    of relationshipTargets
+  ) {
+
+    const npc =
+      npcs.find(
+        x => x.name === name
+      );
+
+    if (!npc) {
+      continue;
+    }
+
+    REL.updateNPC(
+      npc,
+      input,
+      output
+    );
+  }
+
+  if (
+    typeof RELStatus !== "undefined"
+  ) {
+    RELStatus.updateTrackedStatuses(
+      npcs
+    );
+  }
+
+  return {
+    text
+  };
+};
+
+modifier(text);
